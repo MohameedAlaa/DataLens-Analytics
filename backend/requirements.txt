@@ -1,0 +1,8 @@
+# FastAPI backend requirements for DataLens Analytics
+fastapi[all]
+uvicorn[standard]
+pandas
+openpyxl
+transformers
+torch
+httpx
