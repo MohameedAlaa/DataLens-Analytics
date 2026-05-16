@@ -32,14 +32,9 @@ export default function App() {
       <div className="mx-auto grid max-w-[1600px] gap-6 px-6 py-6 xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="space-y-6 min-w-0">
           <div className="rounded-[2rem] border border-slate-800 bg-slate-950/75 p-5 shadow-xl shadow-slate-950/30">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.4em] text-slate/70">Current dataset</p>
-                <h2 className="mt-3 text-xl font-semibold text-surface">{datasetInfo?.filename || 'No dataset loaded'}</h2>
-              </div>
-              <div className="h-12 w-12 rounded-3xl bg-electric/20 text-electric grid place-items-center text-lg font-bold">
-                D
-              </div>
+            <div>
+              <p className="text-sm uppercase tracking-[0.4em] text-slate/70">Current dataset</p>
+              <h2 className="mt-3 text-xl font-semibold text-surface">{datasetInfo?.filename || 'No dataset loaded'}</h2>
             </div>
             <div className="mt-6 space-y-3 text-sm text-slate/80">
               <div className="rounded-3xl bg-white/5 p-3">

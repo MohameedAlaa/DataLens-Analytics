@@ -145,7 +145,7 @@ export default function Chatbot() {
                       ? 'bg-slate-900/90 text-slate-100 ring-1 ring-slate-700/50 rounded-tl-none'
                       : 'bg-gradient-to-r from-emerald-400 to-cyan-300 text-slate-950 font-semibold rounded-br-none'
                   }`}>
-                    <ReactMarkdown className="prose prose-invert prose-sm max-w-none">
+                    <ReactMarkdown components={{p: ({node, ...props}) => <p {...props} />}}>
                       {msg.content}
                     </ReactMarkdown>
                   </div>
