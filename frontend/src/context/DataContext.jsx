@@ -38,13 +38,13 @@ export const DataProvider = ({ children }) => {
 
   // Apply filters – called from useFilters hook
   const applyFilters = async (newFilters) => {
-    if (!datasetInfo?.filename) return;
+    if (!datasetInfo?.filename || !rawData.length) return;
     setLoading(true);
     setError(null);
     try {
       const resp = await axios.post('/api/filter', {
-        filename: datasetInfo.filename,
         filters: newFilters,
+        data: rawData,
       });
       const rows = resp.data.filtered_data || [];
       setFilters(newFilters);
