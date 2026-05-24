@@ -8,7 +8,7 @@ export const useData = () => useContext(DataContext);
 
 export const DataProvider = ({ children }) => {
   const [datasetInfo, setDatasetInfo] = useState(null); // includes columns, dtypes, preview, etc.
-  const [rawData, setRawData] = useState([]); // full rows (limited to 1000 for UI)
+  const [rawData, setRawData] = useState([]); // full rows (limited to 20000 for UI)
   const [filteredData, setFilteredData] = useState([]);
   const [filters, setFilters] = useState({});
   const [loading, setLoading] = useState(false);
@@ -25,7 +25,7 @@ export const DataProvider = ({ children }) => {
       const resp = await axios.post('/api/upload', form);
       const info = resp.data;
       setDatasetInfo(info);
-      // Store first 1000 rows for UI
+      // Store first 20000 rows for UI
       const previewRows = info.preview || [];
       setRawData(previewRows);
       setFilteredData(previewRows);
@@ -48,7 +48,7 @@ export const DataProvider = ({ children }) => {
       });
       const rows = resp.data.filtered_data || [];
       setFilters(newFilters);
-      setFilteredData(rows.slice(0, 1000)); // cap for UI
+      setFilteredData(rows.slice(0, 20000)); // cap for UI
     } catch (e) {
       setError(e.response?.data?.detail || e.message);
     } finally {
