@@ -4,7 +4,7 @@ import { useData } from '../context/DataContext';
 
 // Hook to handle chat messages with the backend LLM endpoint
 export const useChat = () => {
-  const { datasetInfo } = useData();
+  const { datasetInfo, rawData, filteredData } = useData();
   const [messages, setMessages] = useState([]); // {role: 'user'|'assistant', content: string, timestamp: Date}
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -23,6 +23,12 @@ export const useChat = () => {
         return;
       }
 
+      const dataset = filteredData.length ? filteredData : rawData;
+      if (!dataset.length) {
+        setError('Dataset is not available for chat.');
+        return;
+      }
+
       const userMsg = { role: 'user', content: trimmedQuestion, timestamp: new Date() };
       setMessages((prev) => [...prev, userMsg]);
       setLoading(true);
@@ -34,6 +40,7 @@ export const useChat = () => {
           question: trimmedQuestion,
           filename: datasetInfo.filename,
           history,
+          dataset,
         });
         const assistantMsg = {
           role: 'assistant',
@@ -47,7 +54,7 @@ export const useChat = () => {
         setLoading(false);
       }
     },
-    [datasetInfo]
+    [datasetInfo, rawData, filteredData]
   );
 
   const resetChat = useCallback(() => {
