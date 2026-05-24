@@ -43,35 +43,40 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Unsupported file type")
-    contents = await file.read()
     try:
+        if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+        contents = await file.read()
         if file.filename.lower().endswith('.csv'):
             df = pd.read_csv(io.BytesIO(contents))
         else:
             df = pd.read_excel(io.BytesIO(contents))
+        # Store dataframe in memory
+        DATASTORE[file.filename] = df
+        # Basic info
+        cols = list(df.columns)
+        dtypes = {c: str(df[c].dtype) for c in cols}
+        shape = df.shape
+        # Prepare safe preview
+        preview_df = df.head(100).copy()
+        for col in preview_df.select_dtypes(include=["datetime", "datetime64"]).columns:
+            preview_df[col] = preview_df[col].astype(str)
+        preview = preview_df.to_dict(orient="records")
+        types = classify_columns(df)
+        return {
+            "filename": file.filename,
+            "columns": cols,
+            "dtypes": dtypes,
+            "shape": shape,
+            "preview": preview,
+            **types,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
-
-    # Store dataframe in memory
-    DATASTORE[file.filename] = df
-
-    # Basic info
-    cols = list(df.columns)
-    dtypes = {c: str(df[c].dtype) for c in cols}
-    shape = df.shape
-    preview = df.head(10).to_dict(orient="records")
-    types = classify_columns(df)
-
-    return {
-        "filename": file.filename,
-        "columns": cols,
-        "dtypes": dtypes,
-        "shape": shape,
-        "preview": preview,
-        **types,
-    }
+        import traceback, sys
+        print(f"Upload endpoint unexpected error:\n{traceback.format_exc()}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail="Internal server error during file upload")
 
 class FilterRequest(BaseModel):
     filename: str
