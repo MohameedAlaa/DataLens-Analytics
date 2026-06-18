@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, memo } from 'react';
 import { useData } from '../../context/DataContext';
 import {
   ResponsiveContainer,
@@ -49,7 +49,7 @@ const getStats = (values) => {
   };
 };
 
-export default function Dashboard() {
+export default memo(function Dashboard() {
   const { datasetInfo, filteredData } = useData();
   const previewRows = filteredData || [];
   const previewColumns = previewRows[0] ? Object.keys(previewRows[0]) : datasetInfo?.columns || [];
@@ -370,4 +370,4 @@ export default function Dashboard() {
       </div>
     </section>
   );
-}
+});
