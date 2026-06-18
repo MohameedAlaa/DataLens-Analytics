@@ -35,7 +35,7 @@ export default function Filters() {
     datasetInfo.numeric_columns?.forEach((col) => {
       const bounds = getNumericBounds(col);
       if (bounds) {
-        init[col] = { range: bounds };
+        init[col] = { range: [String(bounds[0]), String(bounds[1])] };
       }
     });
     datasetInfo.categorical_columns?.forEach((col) => {
@@ -86,27 +86,38 @@ export default function Filters() {
     applyFilters(payload);
   }, [applyFilters, buildPayload]);
 
-  // Debounce handling
+  // Debounce handling - ONLY depend on localFilters to prevent timer reset when apply changes
   useEffect(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
     const timer = setTimeout(() => apply(), 300);
     setDebounceTimer(timer);
     return () => clearTimeout(timer);
-  }, [localFilters, apply]);
+  }, [localFilters]);
 
-  // Helper to compute top 10 categorical values from the original raw dataset
-  const topValues = (col) => {
+  // Memoized top values computation - avoid recalculation on every render
+  const topValuesCache = useRef({});
+  const topValues = useCallback((col) => {
+    if (topValuesCache.current[col]) {
+      return topValuesCache.current[col];
+    }
     const counts = {};
     const source = rawData.length ? rawData : filteredData;
     source.forEach((row) => {
       const v = row[col];
       if (v != null) counts[v] = (counts[v] || 0) + 1;
     });
-    return Object.entries(counts)
+    const result = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map((e) => e[0]);
-  };
+    topValuesCache.current[col] = result;
+    return result;
+  }, [rawData, filteredData]);
+
+  // Clear cache when data changes
+  useEffect(() => {
+    topValuesCache.current = {};
+  }, [rawData, filteredData]);
 
   if (!datasetInfo) return <p className="p-4 text-slate">No dataset loaded.</p>;
 
@@ -160,7 +171,7 @@ export default function Filters() {
       {/* Numeric filters */}
       {datasetInfo.numeric_columns?.map((col) => {
         const cur = localFilters[col]?.range || ['', ''];
-        const values = filteredData.map((r) => Number(r[col])).filter((v) => !isNaN(v));
+        const values = rawData.map((r) => Number(r[col])).filter((v) => !isNaN(v));
         const min = values.length ? Math.min(...values) : '';
         const max = values.length ? Math.max(...values) : '';
         return (
@@ -242,8 +253,11 @@ export default function Filters() {
         Reset all filters
       </button>
 
-      {loading && <p className="mt-2 text-sm">Applying filters…</p>}
-      {error && <p className="mt-2 text-red-400">{error}</p>}
+      {/* Reserve space for loading/error to prevent layout shift */}
+      <div className="mt-2 h-5">
+        {loading && <p className="text-sm">Applying filters…</p>}
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+      </div>
     </div>
   );
 }

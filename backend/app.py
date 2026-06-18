@@ -2,7 +2,7 @@
 
 import io
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -79,15 +79,25 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Internal server error during file upload")
 
 class FilterRequest(BaseModel):
-    filename: str
     filters: Dict[str, Any]
+    filename: Optional[str] = None
+    data: Optional[List[Dict[str, Any]]] = None
 
 @app.post("/filter")
 async def filter_data(req: FilterRequest):
-    if req.filename not in DATASTORE:
-        raise HTTPException(status_code=404, detail="File not found")
-    df = DATASTORE[req.filename]
+    # Support both patterns: filename (with DATASTORE) or data (direct)
+    if req.filename:
+        if req.filename not in DATASTORE:
+            raise HTTPException(status_code=404, detail="File not found")
+        df = DATASTORE[req.filename]
+    elif req.data:
+        df = pd.DataFrame(req.data)
+    else:
+        raise HTTPException(status_code=400, detail="Either 'filename' or 'data' must be provided")
+    
     for col, condition in req.filters.items():
+        if col not in df.columns:
+            continue
         if isinstance(condition, dict) and "range" in condition:
             lo, hi = condition["range"]
             df = df[(df[col] >= lo) & (df[col] <= hi)]

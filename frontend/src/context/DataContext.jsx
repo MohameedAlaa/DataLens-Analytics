@@ -50,7 +50,20 @@ export const DataProvider = ({ children }) => {
       setFilters(newFilters);
       setFilteredData(rows.slice(0, 20000)); // cap for UI
     } catch (e) {
-      setError(e.response?.data?.detail || e.message);
+      // Handle Pydantic validation errors
+      let errorMsg = e.message;
+      if (e.response?.data?.detail) {
+        const detail = e.response.data.detail;
+        if (Array.isArray(detail)) {
+          // Pydantic validation errors array
+          errorMsg = detail.map(err => `${err.msg} at ${err.loc?.join('.')}`).join('; ');
+        } else if (typeof detail === 'object') {
+          errorMsg = JSON.stringify(detail);
+        } else {
+          errorMsg = detail;
+        }
+      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -67,7 +80,7 @@ export const DataProvider = ({ children }) => {
     if (Object.keys(filters).length === 0 && rawData.length) {
       setFilteredData(rawData);
     }
-  }, [rawData, filters]);
+  }, [rawData]);
 
   return (
     <DataContext.Provider
