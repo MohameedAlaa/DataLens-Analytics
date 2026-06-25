@@ -1,9 +1,9 @@
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from backend.api_helpers import parse_dataset_bytes
 
-app = FastAPI()
+router = APIRouter()
 
-@app.post('/')
+@router.post('/')
 async def upload(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(('.csv', '.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail='Unsupported file type')

@@ -1,17 +1,17 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
 from backend.api_helpers import apply_filters
 
-app = FastAPI()
+router = APIRouter()
 
 class FilterRequest(BaseModel):
     filters: Dict[str, Any]
     data: Optional[List[Dict[str, Any]]] = None
     filename: Optional[str] = None  # Support both patterns
 
-@app.post('/')
+@router.post('/')
 async def filter_data(req: FilterRequest):
     # Validate that we have either data or filename
     if not req.data and not req.filename:
