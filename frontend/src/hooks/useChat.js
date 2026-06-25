@@ -36,7 +36,7 @@ export const useChat = () => {
 
       try {
         const history = messagesRef.current.map((m) => ({ role: m.role, content: m.content }));
-        const resp = await axios.post('/api/chat', {
+        const resp = await axios.post('/api/chat/', {
           question: trimmedQuestion,
           filename: datasetInfo.filename,
           history,
