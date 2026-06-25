@@ -6,7 +6,7 @@ from api.upload import router as upload_router
 
 app = FastAPI()
 
-@app.get("/api")
+@app.get("/")
 async def index():
     return {
         "message": "DataLens Analytics API"
