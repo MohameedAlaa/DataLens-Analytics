@@ -3,6 +3,4 @@ fastapi[all]
 uvicorn[standard]
 pandas
 openpyxl
-transformers
-torch
 httpx
