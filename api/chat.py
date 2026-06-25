@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List
 
 from backend.api_helpers import generate_chat_response
 
-app = FastAPI()
+router = APIRouter()
 
 class ChatMessage(BaseModel):
     role: str
@@ -16,7 +16,7 @@ class ChatRequest(BaseModel):
     dataset: List[Dict[str, Any]]
     filename: str | None = None
 
-@app.post('/')
+@router.post("/")
 async def chat(req: ChatRequest):
     if not req.dataset:
         raise HTTPException(status_code=400, detail='Dataset rows are required for chat requests')
