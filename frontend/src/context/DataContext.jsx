@@ -22,7 +22,7 @@ export const DataProvider = ({ children }) => {
       const form = new FormData();
       form.append('file', file);
       // Let the browser set the Content-Type (and boundary) automatically.
-      const resp = await axios.post('/api/upload', form);
+      const resp = await axios.post('/api/upload/', form);
       const info = resp.data;
       setDatasetInfo(info);
       // Store first 20000 rows for UI
@@ -42,7 +42,7 @@ export const DataProvider = ({ children }) => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await axios.post('/api/filter', {
+      const resp = await axios.post('/api/filter/', {
         filters: newFilters,
         data: rawData,
       });
