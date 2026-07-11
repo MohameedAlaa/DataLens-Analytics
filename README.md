@@ -49,7 +49,7 @@ DataLens-Analytics/
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn app:app --reload
 ```
 
 > Adjust the entry point (`main:app`) if your FastAPI app is defined elsewhere.
