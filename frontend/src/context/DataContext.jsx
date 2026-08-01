@@ -22,7 +22,7 @@ export const DataProvider = ({ children }) => {
       const form = new FormData();
       form.append('file', file);
       // Let the browser set the Content-Type (and boundary) automatically.
-      const resp = await axios.post('/api/upload/', form);
+      const resp = await axios.post('/api/upload', form);
       const info = resp.data;
       setDatasetInfo(info);
       // Store first 20000 rows for UI
@@ -38,13 +38,13 @@ export const DataProvider = ({ children }) => {
 
   // Apply filters – called from useFilters hook
   const applyFilters = async (newFilters) => {
-    if (!datasetInfo?.filename || !rawData.length) return;
+    if (!datasetInfo?.dataset_id) return;
     setLoading(true);
     setError(null);
     try {
-      const resp = await axios.post('/api/filter/', {
+      const resp = await axios.post('/api/filter', {
+        dataset_id: datasetInfo.dataset_id,
         filters: newFilters,
-        data: rawData,
       });
       const rows = resp.data.filtered_data || [];
       setFilters(newFilters);
@@ -71,7 +71,7 @@ export const DataProvider = ({ children }) => {
 
   // Reset all filters
   const resetFilters = async () => {
-    if (!datasetInfo?.filename) return;
+    if (!datasetInfo?.dataset_id) return;
     await applyFilters({});
   };
 

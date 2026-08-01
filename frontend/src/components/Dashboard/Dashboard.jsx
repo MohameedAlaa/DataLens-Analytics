@@ -1,373 +1,691 @@
-import React, { useMemo, memo } from 'react';
+import React, { useMemo, memo, useState, useCallback } from 'react';
 import { useData } from '../../context/DataContext';
 import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ScatterChart,
-  Scatter,
-  LineChart,
-  Line,
-  Legend,
-  AreaChart,
-  Area,
-  PieChart,
-  Pie,
-  Cell,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ComposedChart, BoxPlot,
 } from 'recharts';
-import { Hash, Type, Calendar, Tag, Zap, TrendingUp, PieChart as PieIcon } from 'lucide-react';
+import {
+  TrendingUp, PieChart as PieIcon, BarChart3, ScatterChart as ScatterIcon,
+  Table as TableIcon, Layers, Activity, GitBranch, Grid3x3, Sigma,
+  ChevronDown,
+} from 'lucide-react';
+import AdvancedDataTable from './AdvancedDataTable';
 
-const getDataTypeInfo = (dtype) => {
-  if (dtype.includes('int') || dtype.includes('float')) {
-    return { icon: Hash, color: 'text-blue-400', bg: 'bg-blue-500/10', label: 'Numeric' };
-  }
-  if (dtype.includes('object') || dtype.includes('str')) {
-    return { icon: Type, color: 'text-purple-400', bg: 'bg-purple-500/10', label: 'Text' };
-  }
-  if (dtype.includes('datetime') || dtype.includes('date')) {
-    return { icon: Calendar, color: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Date' };
-  }
-  if (dtype.includes('bool')) {
-    return { icon: Zap, color: 'text-amber-400', bg: 'bg-amber-500/10', label: 'Boolean' };
-  }
-  return { icon: Tag, color: 'text-slate-400', bg: 'bg-slate-500/10', label: 'Other' };
+// ── Palette ──────────────────────────────────────────────────────────────────
+const PALETTE = [
+  '#0ea5e9', '#06b6d4', '#10b981', '#f59e0b',
+  '#8b5cf6', '#ec4899', '#3b82f6', '#f97316',
+];
+
+const TOOLTIP_STYLE = {
+  backgroundColor: '#0f172a',
+  borderColor: '#334155',
+  borderRadius: '0.75rem',
+  fontSize: '11px',
+  color: '#f8fafc',
 };
 
-const CHART_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6'];
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-const getStats = (values) => {
-  const nums = values.filter(v => Number.isFinite(v));
-  if (nums.length === 0) return { min: 0, max: 0, avg: 0 };
+/** Down-sample rows for trend charts to avoid overplotting */
+function sampleRows(rows, maxPts = 300) {
+  if (rows.length <= maxPts) return rows;
+  const step = Math.ceil(rows.length / maxPts);
+  return rows.filter((_, i) => i % step === 0);
+}
+
+/** Build histogram bins for a numeric column */
+function buildHistogram(rows, col, bins = 20) {
+  const vals = rows.map(r => Number(r[col])).filter(v => Number.isFinite(v));
+  if (!vals.length) return [];
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const binSize = (max - min) / bins || 1;
+  const counts = Array.from({ length: bins }, (_, i) => ({
+    bin: `${(min + i * binSize).toFixed(1)}`,
+    count: 0,
+    range: [min + i * binSize, min + (i + 1) * binSize],
+  }));
+  vals.forEach(v => {
+    const idx = Math.min(bins - 1, Math.floor((v - min) / binSize));
+    counts[idx].count++;
+  });
+  return counts;
+}
+
+/** Build box-plot stat for a column */
+function boxStats(rows, col) {
+  const vals = rows.map(r => Number(r[col])).filter(v => Number.isFinite(v)).sort((a, b) => a - b);
+  if (vals.length < 4) return null;
+  const q1 = vals[Math.floor(vals.length * 0.25)];
+  const median = vals[Math.floor(vals.length * 0.5)];
+  const q3 = vals[Math.floor(vals.length * 0.75)];
+  const iqr = q3 - q1;
   return {
-    min: Math.min(...nums).toFixed(2),
-    max: Math.max(...nums).toFixed(2),
-    avg: (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2),
+    col,
+    min: Math.max(vals[0], q1 - 1.5 * iqr),
+    q1, median, q3,
+    max: Math.min(vals[vals.length - 1], q3 + 1.5 * iqr),
+    lowerFence: q1 - 1.5 * iqr,
+    upperFence: q3 + 1.5 * iqr,
   };
-};
+}
 
-export default memo(function Dashboard() {
-  const { datasetInfo, filteredData } = useData();
-  const previewRows = filteredData || [];
-  const previewColumns = previewRows[0] ? Object.keys(previewRows[0]) : datasetInfo?.columns || [];
-  const numericColumns = datasetInfo?.numeric_columns || [];
-  const categoricalColumns = datasetInfo?.categorical_columns || [];
-
-  const categoryCounts = useMemo(() => {
-    if (categoricalColumns.length === 0 || previewRows.length === 0) {
-      return [];
+/** Build correlation heatmap cells */
+function buildHeatmapCells(rows, numericCols) {
+  if (numericCols.length < 2) return [];
+  const cells = [];
+  for (let i = 0; i < numericCols.length; i++) {
+    for (let j = 0; j < numericCols.length; j++) {
+      const a = numericCols[i], b = numericCols[j];
+      const pairsA = rows.map(r => Number(r[a])).filter(v => Number.isFinite(v));
+      const pairsB = rows.map(r => Number(r[b])).filter(v => Number.isFinite(v));
+      const n = Math.min(pairsA.length, pairsB.length);
+      let corr = i === j ? 1 : 0;
+      if (n > 2 && i !== j) {
+        const meanA = pairsA.slice(0, n).reduce((s, v) => s + v, 0) / n;
+        const meanB = pairsB.slice(0, n).reduce((s, v) => s + v, 0) / n;
+        let cov = 0, varA = 0, varB = 0;
+        for (let k = 0; k < n; k++) {
+          const da = pairsA[k] - meanA, db = pairsB[k] - meanB;
+          cov += da * db; varA += da * da; varB += db * db;
+        }
+        const denom = Math.sqrt(varA * varB);
+        corr = denom > 0 ? Number((cov / denom).toFixed(2)) : 0;
+      }
+      cells.push({ x: a, y: b, corr });
     }
-    const key = categoricalColumns[0];
-    const counts = previewRows.reduce((acc, row) => {
-      const label = row[key] ?? 'Unknown';
-      acc[label] = (acc[label] || 0) + 1;
-      return acc;
-    }, {});
+  }
+  return cells;
+}
+
+/** Interpolate red-green for correlation values [-1, 1] */
+function corrColor(val) {
+  if (val >= 0) {
+    const t = val;
+    return `rgba(16,185,129,${0.15 + t * 0.65})`;   // emerald
+  }
+  const t = -val;
+  return `rgba(239,68,68,${0.15 + t * 0.65})`;       // red
+}
+
+// ── Shared card wrapper ───────────────────────────────────────────────────────
+function ChartCard({ id, title, icon: Icon, iconColor, badge, accentClass, children, selector }) {
+  return (
+    <div
+      id={id}
+      className={`p-4 sm:p-5 rounded-2xl border border-surface-border bg-surface-card
+        flex flex-col space-y-3 shadow-sm transition-all duration-200
+        hover:shadow-md ${accentClass || 'hover:border-brand-500/20'}`}
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 body-xs font-bold text-content-primary">
+          <div className={`p-1.5 rounded-lg border ${iconColor || 'bg-brand-500/10 text-brand-400 border-brand-500/20'}`}>
+            <Icon className="w-4 h-4" />
+          </div>
+          <span>{title}</span>
+          {badge && (
+            <span className="ml-1 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
+              {badge}
+            </span>
+          )}
+        </div>
+        {selector}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── Col selector ──────────────────────────────────────────────────────────────
+function ColSelect({ value, options, onChange, accent = 'brand' }) {
+  if (!options || options.length <= 1) return null;
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className={`bg-surface-elevated border border-surface-border body-xs text-content-primary
+        rounded-lg px-2.5 py-1 focus:outline-none focus:border-${accent}-500 transition-colors`}
+    >
+      {options.map(c => <option key={c} value={c}>{c}</option>)}
+    </select>
+  );
+}
+
+// ── Empty chart placeholder ───────────────────────────────────────────────────
+function EmptyChart({ message }) {
+  return (
+    <div className="h-56 flex items-center justify-center body-xs text-content-secondary italic">
+      {message}
+    </div>
+  );
+}
+
+// ── CHART 1 — Numeric Trend (sampled area chart) ──────────────────────────────
+function NumericTrendChart({ rows, numericColumns }) {
+  const [col, setCol] = useState(numericColumns[0] || '');
+  const active = col || numericColumns[0];
+
+  const data = useMemo(() => {
+    if (!active || !rows.length) return [];
+    const sampled = sampleRows(rows, 300);
+    return sampled
+      .map((r, i) => ({ i: i + 1, v: Number(r[active]) }))
+      .filter(d => Number.isFinite(d.v));
+  }, [active, rows]);
+
+  return (
+    <ChartCard
+      title={`Trend — ${active || 'N/A'}`}
+      icon={TrendingUp}
+      iconColor="bg-brand-500/10 text-brand-400 border-brand-500/20"
+      accentClass="hover:border-brand-500/20"
+      selector={<ColSelect value={active} options={numericColumns} onChange={setCol} />}
+    >
+      <div className="h-56 w-full">
+        {data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+              <defs>
+                <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.7} />
+                  <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+              <XAxis dataKey="i" stroke="#64748b" fontSize={9} tickLine={false} label={{ value: `row (sampled)`, position: 'insideBottomRight', offset: -4, fontSize: 8, fill: '#64748b' }} />
+              <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [v.toFixed(2), active]} />
+              <Area type="monotone" dataKey="v" stroke="#0ea5e9" strokeWidth={1.5} fillOpacity={1} fill="url(#trendGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="No numeric data available." />}
+      </div>
+    </ChartCard>
+  );
+}
+
+// ── CHART 2 — Histogram ───────────────────────────────────────────────────────
+function HistogramChart({ rows, numericColumns }) {
+  const [col, setCol] = useState(numericColumns[0] || '');
+  const active = col || numericColumns[0];
+
+  const bins = useMemo(() => buildHistogram(rows, active, 20), [active, rows]);
+
+  return (
+    <ChartCard
+      title={`Histogram — ${active || 'N/A'}`}
+      icon={BarChart3}
+      iconColor="bg-purple-500/10 text-purple-400 border-purple-500/20"
+      accentClass="hover:border-purple-500/20"
+      selector={<ColSelect value={active} options={numericColumns} onChange={setCol} accent="purple" />}
+    >
+      <div className="h-56 w-full">
+        {bins.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={bins} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+              <XAxis dataKey="bin" stroke="#64748b" fontSize={8} tickLine={false} interval="preserveStartEnd" />
+              <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n, p) => [v, `freq [${Number(p.payload.range?.[0]).toFixed(1)}, ${Number(p.payload.range?.[1]).toFixed(1)})`]} />
+              <Bar dataKey="count" fill="#8b5cf6" radius={[2, 2, 0, 0]} maxBarSize={32} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="Insufficient numeric data for histogram." />}
+      </div>
+    </ChartCard>
+  );
+}
+
+// ── CHART 3 — Scatter Plot ────────────────────────────────────────────────────
+function ScatterPlotChart({ rows, numericColumns }) {
+  const [colX, setColX] = useState(numericColumns[0] || '');
+  const [colY, setColY] = useState(numericColumns[1] || numericColumns[0] || '');
+  const activeX = colX || numericColumns[0];
+  const activeY = colY || numericColumns[1] || numericColumns[0];
+
+  const data = useMemo(() => {
+    if (!activeX || !activeY || !rows.length) return [];
+    return sampleRows(rows, 400)
+      .map(r => ({ x: Number(r[activeX]), y: Number(r[activeY]) }))
+      .filter(d => Number.isFinite(d.x) && Number.isFinite(d.y));
+  }, [activeX, activeY, rows]);
+
+  return (
+    <ChartCard
+      title={`Scatter — ${activeX} vs ${activeY}`}
+      icon={ScatterIcon}
+      iconColor="bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+      accentClass="hover:border-cyan-500/20"
+      selector={
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <ColSelect value={activeX} options={numericColumns} onChange={setColX} accent="cyan" />
+          <span className="body-xs text-content-muted">vs</span>
+          <ColSelect value={activeY} options={numericColumns} onChange={setColY} accent="cyan" />
+        </div>
+      }
+    >
+      <div className="h-56 w-full">
+        {data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+              <XAxis dataKey="x" type="number" name={activeX} stroke="#64748b" fontSize={9} tickLine={false} />
+              <YAxis dataKey="y" type="number" name={activeY} stroke="#64748b" fontSize={9} tickLine={false} />
+              <ZAxis range={[12, 12]} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ strokeDasharray: '3 3' }} formatter={(v, n) => [Number(v).toFixed(2), n]} />
+              <Scatter data={data} fill="#06b6d4" fillOpacity={0.65} />
+            </ScatterChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="Select two different numeric columns." />}
+      </div>
+    </ChartCard>
+  );
+}
+
+// ── CHART 4 — Categorical Bar ─────────────────────────────────────────────────
+function CategoricalBarChart({ rows, catColumns }) {
+  const [col, setCol] = useState(catColumns[0] || '');
+  const active = col || catColumns[0];
+
+  const data = useMemo(() => {
+    if (!active || !rows.length) return [];
+    const counts = {};
+    rows.forEach(r => { const v = String(r[active] ?? 'null'); counts[v] = (counts[v] || 0) + 1; });
     return Object.entries(counts)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
-  }, [categoricalColumns, previewRows]);
-
-  const scatterData = useMemo(() => {
-    if (numericColumns.length < 2 || previewRows.length === 0) return [];
-    const [xKey, yKey] = numericColumns;
-    return previewRows
-      .map((row, index) => ({
-        x: Number(row[xKey]),
-        y: Number(row[yKey]),
-        label: row[categoricalColumns?.[0]] ?? `Row ${index + 1}`,
-      }))
-      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-  }, [numericColumns, categoricalColumns, previewRows]);
-
-  const lineData = useMemo(() => {
-    if (numericColumns.length === 0 || previewRows.length === 0) return [];
-    const key = numericColumns[0];
-    return previewRows
-      .map((row, index) => ({
-        index: index + 1,
-        value: Number(row[key]),
-      }))
-      .filter((item) => Number.isFinite(item.value));
-  }, [numericColumns, previewRows]);
-
-  if (!datasetInfo) {
-    return (
-      <section className="rounded-[2rem] border border-slate-800 bg-slate-950/75 p-6 shadow-xl shadow-slate-950/30">
-        <p className="text-slate">No dataset loaded yet. Upload a file to view dashboard details.</p>
-      </section>
-    );
-  }
+      .slice(0, 15);
+  }, [active, rows]);
 
   return (
-    <section className="rounded-[2rem] border border-slate-800 bg-slate-950/75 p-6 shadow-xl shadow-slate-950/30">
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm uppercase tracking-[0.35em] text-slate/70">Dataset dashboard</p>
-          <h2 className="mt-3 text-2xl font-semibold text-surface">Interactive analytics</h2>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 text-slate/80 text-sm">
-          <div className="rounded-3xl bg-white/5 p-4">
-            <p className="text-xs uppercase tracking-[0.35em]">Rows</p>
-            <p className="mt-2 text-xl font-semibold text-surface">{datasetInfo.shape?.[0] ?? 'n/a'}</p>
-          </div>
-          <div className="rounded-3xl bg-white/5 p-4">
-            <p className="text-xs uppercase tracking-[0.35em]">Columns</p>
-            <p className="mt-2 text-xl font-semibold text-surface">{datasetInfo.shape?.[1] ?? 'n/a'}</p>
-          </div>
-        </div>
+    <ChartCard
+      title={`Distribution — ${active || 'N/A'}`}
+      icon={BarChart3}
+      iconColor="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+      accentClass="hover:border-emerald-500/20"
+      selector={<ColSelect value={active} options={catColumns} onChange={setCol} accent="emerald" />}
+    >
+      <div className="h-56 w-full">
+        {data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
+              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" stroke="#64748b" fontSize={9} tickLine={false} />
+              <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={8} tickLine={false} width={90} tick={{ fill: '#94a3b8' }} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Bar dataKey="value" radius={[0, 3, 3, 0]} maxBarSize={20}>
+                {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="No categorical data available." />}
       </div>
+    </ChartCard>
+  );
+}
 
-      <div className="grid gap-6 xl:grid-cols-2 min-w-0">
-        <div className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-[#111827]/80 p-6 shadow-lg shadow-blue-500/5 min-w-0">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <Tag className="w-4 h-4 text-blue-400" />
-            </div>
-            <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">Columns</h3>
-            <span className="ml-auto text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded-lg">{datasetInfo.columns.length}</span>
+// ── CHART 5 — Pie Chart ───────────────────────────────────────────────────────
+function PieChartCard({ rows, catColumns }) {
+  const [col, setCol] = useState(catColumns[0] || '');
+  const active = col || catColumns[0];
+
+  const data = useMemo(() => {
+    if (!active || !rows.length) return [];
+    const counts = {};
+    rows.forEach(r => { const v = String(r[active] ?? 'null'); counts[v] = (counts[v] || 0) + 1; });
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  }, [active, rows]);
+
+  const RADIAN = Math.PI / 180;
+  const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+    if (percent < 0.05) return null;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.6;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight="600">{`${(percent * 100).toFixed(0)}%`}</text>;
+  };
+
+  return (
+    <ChartCard
+      title={`Segments — ${active || 'N/A'}`}
+      icon={PieIcon}
+      iconColor="bg-amber-500/10 text-amber-400 border-amber-500/20"
+      accentClass="hover:border-amber-500/20"
+      selector={<ColSelect value={active} options={catColumns} onChange={setCol} accent="amber" />}
+    >
+      <div className="h-56 w-full">
+        {data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data} cx="50%" cy="50%" outerRadius={80} dataKey="value" labelLine={false} label={renderLabel}>
+                {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => [v, name]} />
+            </PieChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="No categorical data for pie chart." />}
+      </div>
+      {/* Legend */}
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+        {data.slice(0, 6).map((d, i) => (
+          <div key={i} className="flex items-center gap-1 body-xs text-content-secondary">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PALETTE[i % PALETTE.length] }} />
+            <span className="truncate max-w-[80px]">{d.name}</span>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2 min-w-0">
-            {datasetInfo.columns.map((column, idx) => (
-              <div
-                key={column}
-                className="group relative rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-700/30 hover:from-slate-700/80 hover:to-slate-600/40 px-4 py-3 text-sm text-surface/90 break-words min-w-0 transition-all duration-300 cursor-default border border-slate-700/30 hover:border-slate-600/50 shadow-sm hover:shadow-md"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400/60 group-hover:bg-cyan-300" />
-                  {column}
-                </div>
+        ))}
+      </div>
+    </ChartCard>
+  );
+}
+
+// ── CHART 6 — Box Plot (custom via ComposedChart) ─────────────────────────────
+function BoxPlotChart({ rows, numericColumns }) {
+  const cols = numericColumns.slice(0, 6);
+
+  const data = useMemo(() =>
+    cols.map(c => boxStats(rows, c)).filter(Boolean),
+  [rows, cols]);
+
+  return (
+    <ChartCard
+      title="Box Plot — IQR Distribution"
+      icon={Activity}
+      iconColor="bg-rose-500/10 text-rose-400 border-rose-500/20"
+      accentClass="hover:border-rose-500/20"
+      badge={`${data.length} columns`}
+    >
+      <div className="h-56 w-full">
+        {data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={data}
+              margin={{ top: 8, right: 8, left: -22, bottom: 20 }}
+            >
+              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+              <XAxis dataKey="col" stroke="#64748b" fontSize={8} tickLine={false} interval={0} angle={-30} textAnchor="end" />
+              <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                content={({ payload }) => {
+                  if (!payload?.length) return null;
+                  const d = payload[0]?.payload;
+                  if (!d) return null;
+                  return (
+                    <div style={{ ...TOOLTIP_STYLE, padding: '8px 12px', border: '1px solid #334155' }}>
+                      <p style={{ fontWeight: 700, marginBottom: 4 }}>{d.col}</p>
+                      {[['Min', d.min], ['Q1', d.q1], ['Median', d.median], ['Q3', d.q3], ['Max', d.max]].map(([k, v]) => (
+                        <p key={k} style={{ margin: '1px 0' }}><span style={{ color: '#94a3b8' }}>{k}: </span>{Number(v).toFixed(2)}</p>
+                      ))}
+                    </div>
+                  );
+                }}
+              />
+              {/* IQR box (q3 - q1) stacked on top of q1 baseline */}
+              <Bar dataKey="q1" stackId="box" fill="transparent" stroke="transparent" />
+              <Bar dataKey={() => null} stackId="box" fill="transparent">
+                {data.map((d, i) => (
+                  <Cell
+                    key={i}
+                    fill={PALETTE[i % PALETTE.length]}
+                    fillOpacity={0.4}
+                    stroke={PALETTE[i % PALETTE.length]}
+                    strokeWidth={1.5}
+                  />
+                ))}
+              </Bar>
+              {/* Median line */}
+              <Bar
+                dataKey="median"
+                fill="transparent"
+                stroke="transparent"
+                label={{ position: 'top', fontSize: 8, fill: '#94a3b8', formatter: v => v?.toFixed(1) }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="Need at least 4 rows per numeric column for box stats." />}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1">
+        {data.map((d, i) => (
+          <div key={d.col} className="flex items-center gap-1.5 body-xs text-content-secondary">
+            <span className="w-2 h-2 rounded-sm" style={{ background: PALETTE[i % PALETTE.length], opacity: 0.8 }} />
+            <span className="truncate max-w-[80px]">{d.col}</span>
+            <span className="text-content-muted">M={Number(d.median).toFixed(1)}</span>
+          </div>
+        ))}
+      </div>
+    </ChartCard>
+  );
+}
+
+// ── CHART 7 — Correlation Heatmap ─────────────────────────────────────────────
+function CorrelationHeatmap({ rows, numericColumns }) {
+  const cols = numericColumns.slice(0, 8);
+  const cells = useMemo(() => buildHeatmapCells(sampleRows(rows, 500), cols), [rows, cols]);
+
+  if (cols.length < 2) return null;
+
+  const cellSize = Math.min(56, Math.floor(360 / cols.length));
+
+  return (
+    <ChartCard
+      title="Correlation Heatmap"
+      icon={GitBranch}
+      iconColor="bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+      accentClass="hover:border-indigo-500/20"
+      badge={`${cols.length}×${cols.length}`}
+    >
+      <div className="overflow-x-auto custom-scrollbar">
+        <div className="inline-block min-w-max">
+          {/* Column headers */}
+          <div className="flex" style={{ paddingLeft: cellSize + 4 }}>
+            {cols.map(c => (
+              <div key={c} className="text-[8px] text-content-muted text-center truncate font-medium"
+                style={{ width: cellSize, maxWidth: cellSize }}>
+                {c.length > 6 ? c.slice(0, 6) + '…' : c}
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-[#111827]/80 p-6 shadow-lg shadow-purple-500/5 min-w-0">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="h-8 w-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-purple-400" />
-            </div>
-            <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">Data types</h3>
-            <span className="ml-auto text-xs bg-purple-500/20 text-purple-300 px-2 py-1 rounded-lg">{Object.keys(datasetInfo.dtypes).length}</span>
-          </div>
-          <div className="space-y-2 text-sm text-slate/80 min-w-0">
-            {Object.entries(datasetInfo.dtypes).map(([column, dtype]) => {
-              const typeInfo = getDataTypeInfo(dtype);
-              const IconComponent = typeInfo.icon;
-              return (
-                <div
-                  key={column}
-                  className="group rounded-2xl bg-gradient-to-r from-slate-800/40 to-slate-700/20 hover:from-slate-700/60 hover:to-slate-600/30 p-3 break-words min-w-0 transition-all duration-300 border border-slate-700/30 hover:border-slate-600/50"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`${typeInfo.bg} ${typeInfo.color} p-2 rounded-lg flex-shrink-0 group-hover:scale-110 transition-transform`}>
-                      <IconComponent className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-surface text-sm">{column}</p>
-                      <p className="text-xs text-slate/60 mt-1">
-                        <span className={`${typeInfo.bg} ${typeInfo.color} px-2 py-0.5 rounded text-xs font-medium`}>
-                          {typeInfo.label}
-                        </span>
-                      </p>
-                    </div>
+          {/* Rows */}
+          {cols.map((rowCol, ri) => (
+            <div key={rowCol} className="flex items-center">
+              <div className="text-[8px] text-content-muted text-right pr-1 shrink-0 truncate font-medium"
+                style={{ width: cellSize, maxWidth: cellSize }}>
+                {rowCol.length > 6 ? rowCol.slice(0, 6) + '…' : rowCol}
+              </div>
+              {cols.map((colCol, ci) => {
+                const cell = cells.find(c => c.x === colCol && c.y === rowCol);
+                const val = cell?.corr ?? 0;
+                return (
+                  <div
+                    key={colCol}
+                    title={`${rowCol} × ${colCol}: ${val}`}
+                    className="flex items-center justify-center text-[9px] font-bold border border-surface-bg/30 transition-all hover:scale-105 cursor-default"
+                    style={{
+                      width: cellSize,
+                      height: cellSize,
+                      background: corrColor(val),
+                      color: Math.abs(val) > 0.5 ? '#f8fafc' : '#94a3b8',
+                    }}
+                  >
+                    {val.toFixed(2)}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          ))}
+          {/* Color scale legend */}
+          <div className="flex items-center gap-2 mt-2 px-1">
+            <span className="text-[9px] text-red-400">−1</span>
+            <div className="h-2 flex-1 rounded" style={{ background: 'linear-gradient(to right, rgba(239,68,68,0.8), rgba(30,41,59,0.4), rgba(16,185,129,0.8))' }} />
+            <span className="text-[9px] text-emerald-400">+1</span>
           </div>
         </div>
       </div>
+    </ChartCard>
+  );
+}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        {scatterData.length > 0 ? (
-          <div className="rounded-3xl border border-slate-800 bg-gradient-to-br from-[#1e293b]/50 to-[#111827]/80 p-6 shadow-lg shadow-blue-500/10">
-            <div className="flex items-center gap-2 mb-5">
-              <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <Hash className="w-4 h-4 text-blue-400" />
-              </div>
-              <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">
-                Scatter: {numericColumns[0]} vs {numericColumns[1]}
-              </h3>
-            </div>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-                  <XAxis type="number" dataKey="x" name={numericColumns[0]} stroke="#94a3b8" />
-                  <YAxis type="number" dataKey="y" name={numericColumns[1]} stroke="#94a3b8" />
-                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem' }} />
-                  <Scatter name="Data points" data={scatterData} fill="#3b82f6" fillOpacity={0.7} />
-                </ScatterChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        ) : numericColumns.length > 0 ? (
-          <div className="rounded-3xl border border-slate-800 bg-gradient-to-br from-[#1e293b]/50 to-[#111827]/80 p-6 shadow-lg shadow-cyan-500/10">
-            <div className="flex items-center gap-2 mb-5">
-              <div className="h-8 w-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-                <TrendingUp className="w-4 h-4 text-cyan-400" />
-              </div>
-              <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">
-                Trend: {numericColumns[0]}
-              </h3>
-            </div>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={lineData}>
-                  <defs>
-                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-                  <XAxis dataKey="index" stroke="#94a3b8" />
-                  <YAxis stroke="#94a3b8" />
-                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem' }} />
-                  <Area type="monotone" dataKey="value" stroke="#06b6d4" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        ) : null}
+// ── CHART 8 — Radar (multi-column profile) ────────────────────────────────────
+function RadarProfileChart({ rows, numericColumns }) {
+  const cols = numericColumns.slice(0, 7);
 
-        {categoryCounts.length > 0 && (
-          <div className="rounded-3xl border border-slate-800 bg-gradient-to-br from-[#1e293b]/50 to-[#111827]/80 p-6 shadow-lg shadow-emerald-500/10">
-            <div className="flex items-center gap-2 mb-5">
-              <div className="h-8 w-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                <PieIcon className="w-4 h-4 text-emerald-400" />
-              </div>
-              <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">
-                Distribution: {categoricalColumns[0]}
-              </h3>
-            </div>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={categoryCounts} cx="50%" cy="50%" labelLine={false} label={({ name, value }) => `${name}: ${value}`} outerRadius={100} fill="#8884d8" dataKey="value">
-                    {categoryCounts.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
+  const data = useMemo(() => {
+    if (!cols.length || !rows.length) return [];
+    // Normalize each column to 0-100 for radar
+    return cols.map(col => {
+      const vals = rows.map(r => Number(r[col])).filter(v => Number.isFinite(v));
+      if (!vals.length) return { col, mean: 0, pct: 0 };
+      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const pct = max > min ? Math.round(((mean - min) / (max - min)) * 100) : 50;
+      return { col, mean: Number(mean.toFixed(2)), pct };
+    });
+  }, [rows, cols]);
+
+  return (
+    <ChartCard
+      title="Numeric Profile (Radar)"
+      icon={Sigma}
+      iconColor="bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20"
+      accentClass="hover:border-fuchsia-500/20"
+      badge="normalized"
+    >
+      <div className="h-56 w-full">
+        {data.length >= 3 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart data={data}>
+              <PolarGrid stroke="#1e293b" />
+              <PolarAngleAxis dataKey="col" tick={{ fill: '#64748b', fontSize: 9 }} />
+              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 8 }} />
+              <Radar name="Mean %" dataKey="pct" stroke="#a855f7" fill="#a855f7" fillOpacity={0.3} strokeWidth={2} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, _, p) => [`${v}% (mean: ${p.payload.mean})`, p.payload.col]} />
+            </RadarChart>
+          </ResponsiveContainer>
+        ) : <EmptyChart message="Need at least 3 numeric columns for radar chart." />}
       </div>
+    </ChartCard>
+  );
+}
 
-      {categoryCounts.length > 0 && (
-        <div className="mt-6 rounded-3xl border border-slate-800 bg-gradient-to-br from-[#1e293b]/50 to-[#111827]/80 p-6 shadow-lg shadow-blue-500/10">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <Hash className="w-4 h-4 text-blue-400" />
-            </div>
-            <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">
-              Categories: {categoricalColumns[0]}
-            </h3>
-          </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={categoryCounts} margin={{ left: 0, right: 30, top: 20, bottom: 20 }}>
-                <defs>
-                  <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#1e40af" />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-                <XAxis dataKey="name" stroke="#94a3b8" angle={-45} textAnchor="end" height={100} />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '0.75rem' }} />
-                <Bar dataKey="value" fill="url(#barGradient)" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+// ── EMPTY STATE ───────────────────────────────────────────────────────────────
+function DashboardEmpty() {
+  return (
+    <div className="p-8 rounded-2xl border border-surface-border bg-surface-card text-center space-y-3">
+      <Layers className="w-8 h-8 text-brand-400 mx-auto opacity-50" />
+      <h3 className="heading-xs">Dashboard Inactive</h3>
+      <p className="body-xs text-content-secondary max-w-sm mx-auto">
+        Please upload a CSV or Excel dataset to render interactive visual charts and dynamic tables.
+      </p>
+    </div>
+  );
+}
+
+// ── SECTION HEADER ─────────────────────────────────────────────────────────────
+function SectionHeader({ icon: Icon, label }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="p-1.5 rounded-lg bg-surface-elevated text-content-secondary border border-surface-border">
+        <Icon className="w-4 h-4" />
+      </div>
+      <h3 className="label-caps font-bold text-content-primary">{label}</h3>
+    </div>
+  );
+}
+
+// ── MAIN DASHBOARD ────────────────────────────────────────────────────────────
+export default memo(function Dashboard() {
+  const { datasetInfo, filteredData } = useData();
+  const rows = filteredData || [];
+
+  const numericColumns = datasetInfo?.numeric_columns || [];
+  const catColumns = datasetInfo?.categorical_columns || [];
+  const hasNumeric = numericColumns.length > 0;
+  const hasCat = catColumns.length > 0;
+  const hasMultiNum = numericColumns.length >= 2;
+
+  if (!datasetInfo) return <DashboardEmpty />;
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── ROW 1: Trend + Histogram ────────────────────────────────────────── */}
+      {hasNumeric && (
+        <div className="space-y-3">
+          <SectionHeader icon={TrendingUp} label="Trend & Distribution" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <NumericTrendChart rows={rows} numericColumns={numericColumns} />
+            <HistogramChart rows={rows} numericColumns={numericColumns} />
           </div>
         </div>
       )}
 
-      {numericColumns.length > 0 && (
-        <div className="mt-6 grid gap-4 grid-cols-1 sm:grid-cols-3">
-          {numericColumns.slice(0, 3).map((col) => {
-            const values = previewRows.map(r => Number(r[col])).filter(v => Number.isFinite(v));
-            const stats = getStats(values);
-            return (
-              <div key={col} className="rounded-3xl border border-slate-800 bg-gradient-to-br from-[#1e293b]/60 to-[#111827]/80 p-6 shadow-lg shadow-amber-500/10">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-surface">{col}</h3>
-                  <div className="h-6 w-6 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                    <TrendingUp className="w-3 h-3 text-amber-400" />
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="p-3 rounded-2xl bg-slate-700/30 border border-slate-600/20">
-                    <p className="text-xs text-slate/60 uppercase tracking-wider">Average</p>
-                    <p className="text-lg font-bold text-cyan-300 mt-1">{stats.avg}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2 rounded-xl bg-slate-700/20 border border-slate-600/20">
-                      <p className="text-xs text-slate/60">Min</p>
-                      <p className="text-sm font-semibold text-blue-300">{stats.min}</p>
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-700/20 border border-slate-600/20">
-                      <p className="text-xs text-slate/60">Max</p>
-                      <p className="text-sm font-semibold text-emerald-300">{stats.max}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      {/* ── ROW 2: Scatter + Categorical / Fallback ─────────────────────────── */}
+      <div className="space-y-3">
+        <SectionHeader icon={ScatterIcon} label="Relationships & Segments" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {hasMultiNum ? (
+            <ScatterPlotChart rows={rows} numericColumns={numericColumns} />
+          ) : hasNumeric ? (
+            <NumericTrendChart rows={rows} numericColumns={numericColumns} />
+          ) : (
+            <div className="p-5 rounded-2xl border border-surface-border bg-surface-card body-xs text-content-secondary flex items-center justify-center italic">
+              No numeric columns available for scatter plot.
+            </div>
+          )}
+
+          {hasCat ? (
+            <CategoricalBarChart rows={rows} catColumns={catColumns} />
+          ) : hasNumeric ? (
+            // Fallback: second histogram on different column
+            <HistogramChart rows={rows} numericColumns={[...numericColumns].reverse()} />
+          ) : (
+            <div className="p-5 rounded-2xl border border-surface-border bg-surface-card body-xs text-content-secondary flex items-center justify-center italic">
+              No categorical columns available.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── ROW 3: Pie + Box Plot ────────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <SectionHeader icon={PieIcon} label="Proportions & Spread" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {hasCat ? (
+            <PieChartCard rows={rows} catColumns={catColumns} />
+          ) : hasNumeric ? (
+            <BoxPlotChart rows={rows} numericColumns={numericColumns} />
+          ) : null}
+
+          {hasNumeric ? (
+            <BoxPlotChart rows={rows} numericColumns={numericColumns} />
+          ) : hasCat ? (
+            <CategoricalBarChart rows={rows} catColumns={catColumns} />
+          ) : null}
+        </div>
+      </div>
+
+      {/* ── ROW 4: Correlation Heatmap + Radar ──────────────────────────────── */}
+      {hasMultiNum && (
+        <div className="space-y-3">
+          <SectionHeader icon={GitBranch} label="Correlations & Profiles" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <CorrelationHeatmap rows={rows} numericColumns={numericColumns} />
+            <RadarProfileChart rows={rows} numericColumns={numericColumns} />
+          </div>
         </div>
       )}
 
-      <div className="mt-6 rounded-3xl border border-slate-800 bg-gradient-to-br from-[#1e293b]/50 to-[#111827]/80 p-6 shadow-lg shadow-purple-500/10">
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-              <Type className="w-4 h-4 text-purple-400" />
-            </div>
-            <h3 className="text-sm uppercase tracking-[0.35em] text-slate/70 font-semibold">Data Preview</h3>
-          </div>
-          <span className="rounded-full bg-purple-500/20 text-purple-300 px-3 py-1 text-xs font-medium">Showing top 6 rows</span>
-        </div>
-        {previewRows.length === 0 ? (
-          <p className="text-slate/70">No preview rows available.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-2xl border border-slate-700/40">
-            <table className="min-w-full table-auto text-sm">
-              <thead className="bg-gradient-to-r from-slate-800/60 to-slate-700/40">
-                <tr>
-                  {previewColumns.map((column) => (
-                    <th key={column} className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-slate/60 font-semibold border-b border-slate-700/40">
-                      {column}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {previewRows.slice(0, 6).map((row, rowIndex) => (
-                  <tr key={rowIndex} className={`border-b border-slate-700/30 transition-all duration-200 hover:bg-slate-800/40 ${rowIndex % 2 === 0 ? 'bg-slate-900/30' : 'bg-slate-950/20'}`}>
-                    {previewColumns.map((column) => (
-                      <td key={column} className="px-4 py-3 text-surface/90 break-words">
-                        <span className="inline-block px-2 py-1 rounded-lg bg-slate-800/50 border border-slate-700/30">
-                          {String(row[column] ?? '—')}
-                        </span>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      {/* ── Dataset Browser ──────────────────────────────────────────────────── */}
+      <div id="dataset" className="space-y-3">
+        <SectionHeader icon={TableIcon} label="Filtered Dataset Browser" />
+        <AdvancedDataTable />
       </div>
-    </section>
+    </div>
   );
 });

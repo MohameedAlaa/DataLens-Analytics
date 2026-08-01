@@ -1,247 +1,430 @@
 # FastAPI backend for DataLens Analytics
 
 import io
-import json
+import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
 
-import httpx
-import os
-from AI import call_qwen
+from api_helpers import (
+    AIRateLimitError,
+    AIUnavailableError,
+    apply_filters,
+    calculate_dataset_stats,
+    detect_csv_encoding,
+    generate_chat_response_async,
+    parse_dataset_bytes,
+)
+from config import settings
+from dataset_manager import DatasetManager
+from logging_config import configure_logging
+from security import (
+    RequestIDMiddleware,
+    SecurityHeadersMiddleware,
+    create_rate_limiter,
+    register_exception_handlers,
+    sanitise_filters,
+    sanitise_question,
+    validate_file_magic,
+)
+from services.ai.rag.ingestion_pipeline import ingestion_pipeline
 
-app = FastAPI()
+# ---------------------------------------------------------------------------
+# Logging — must be configured before the first log call
+# ---------------------------------------------------------------------------
+configure_logging()
+logger = logging.getLogger(__name__)
 
-# Enable CORS for local frontend development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ---------------------------------------------------------------------------
+# Dataset manager — single instance for the process lifetime
+# Swap the storage engine at startup to use DuckDB, SQLite, or Redis:
+#   dataset_manager.set_engine(DuckDBStorageEngine(...))
+# ---------------------------------------------------------------------------
+dataset_manager = DatasetManager()
+
+# ---------------------------------------------------------------------------
+# Rate limiter (optional — degrades gracefully if slowapi is not installed)
+# ---------------------------------------------------------------------------
+limiter = create_rate_limiter()
+
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="DataLens Analytics API",
+    description="Backend service for data parsing, filtering, statistics, and AI chat analysis.",
+    version="1.0.0",
+    # Disable automatic /docs and /redoc in production to reduce attack surface
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
-# In‑memory store for uploaded dataframes: filename -> DataFrame
-DATASTORE: Dict[str, pd.DataFrame] = {}
+# ---------------------------------------------------------------------------
+# Middleware (applied in reverse registration order — last added runs first)
+# ---------------------------------------------------------------------------
 
-# The chat assistant uses Google Gemini 1.5 Flash via the Google Generative Language API (see AI.py)
+# 1. Security headers on every response
+app.add_middleware(SecurityHeadersMiddleware)
 
-# Helper to detect column types
-def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
-    numeric = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    categorical = [c for c in df.columns if pd.api.types.is_object_dtype(df[c])]
-    date = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
-    return {
-        "numeric_columns": numeric,
-        "categorical_columns": categorical,
-        "date_columns": date,
-    }
+# 2. Request-ID tracing
+app.add_middleware(RequestIDMiddleware)
+
+# 3. CORS — origins loaded from env var CORS_ORIGINS (comma-separated).
+#    Defaults to localhost only.  Set CORS_ORIGINS=* only for local dev.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=settings.cors_allow_credentials,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Request-ID"],
+)
+
+# 4. Attach rate-limiter state (required by slowapi) — no-op if limiter is None
+if limiter is not None:
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# 5. Global structured exception handlers
+register_exception_handlers(app)
+
+logger.info(
+    "DataLens Analytics API starting",
+    extra={
+        "env": settings.app_env,
+        "cors_origins": settings.cors_origins,
+        "max_upload_mb": settings.max_upload_bytes // (1024 * 1024),
+        "rate_limit_upload": settings.rate_limit_upload,
+        "rate_limit_chat": settings.rate_limit_chat,
+        "log_format": settings.log_format,
+    },
+)
+
+
+# ---------------------------------------------------------------------------
+# Helper: decorate endpoint with optional rate limit
+# ---------------------------------------------------------------------------
+def _rate_limited(limit_string: str):
+    """Return a slowapi rate-limit decorator, or a no-op if slowapi is absent."""
+    if limiter is not None:
+        return limiter.limit(limit_string)
+    # No-op decorator
+    def _noop(fn):
+        return fn
+    return _noop
+
+
+# ---------------------------------------------------------------------------
+# Upload
+# ---------------------------------------------------------------------------
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+@_rate_limited(settings.rate_limit_upload)
+async def upload_file(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Validate, parse an uploaded dataset file (CSV/Excel), assign a UUID, and store internally.
+
+    Validation pipeline:
+      1. Filename present and has allowed extension
+      2. Magic-byte check (prevents MIME spoofing / executable uploads)
+      3. File-size limit (default 50 MB, set via MAX_UPLOAD_MB)
+      4. CSV/Excel parseable
+      5. Non-empty (rows and columns)
+      6. No duplicate column headers
+    """
+    request_id = getattr(request.state, "request_id", "?")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+
+    logger.info(
+        "Upload request received",
+        extra={"request_id": request_id, "target_filename": file.filename},
+    )
+
     try:
-        if not file.filename.lower().endswith((".csv", ".xlsx", ".xls")):
-            raise HTTPException(status_code=400, detail="Unsupported file type")
         contents = await file.read()
-        if file.filename.lower().endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(contents))
+
+        # Security: magic-byte validation before any parsing
+        validate_file_magic(contents, file.filename)
+
+        # Full validation + preview parsing (size, encoding, duplicates, emptiness)
+        parsed_result = parse_dataset_bytes(
+            contents,
+            file.filename,
+            preview_limit=settings.upload_preview_limit,
+            max_bytes=settings.max_upload_bytes,
+        )
+
+        # Re-parse the full DataFrame for storage
+        if file.filename.lower().endswith(".csv"):
+            encoding = detect_csv_encoding(contents)
+            df = pd.read_csv(io.BytesIO(contents), encoding=encoding)
         else:
             df = pd.read_excel(io.BytesIO(contents))
-        # Store dataframe in memory
-        DATASTORE[file.filename] = df
-        # Basic info
-        cols = list(df.columns)
-        dtypes = {c: str(df[c].dtype) for c in cols}
-        shape = df.shape
-        # Prepare safe preview
-        preview_df = df.head(100).copy()
-        for col in preview_df.select_dtypes(include=["datetime", "datetime64"]).columns:
-            preview_df[col] = preview_df[col].astype(str)
-        preview = preview_df.to_dict(orient="records")
-        types = classify_columns(df)
-        return {
-            "filename": file.filename,
-            "columns": cols,
-            "dtypes": dtypes,
-            "shape": shape,
-            "preview": preview,
-            **types,
-        }
+
+        dataset_id = parsed_result["dataset_id"]
+        dataset_manager.register_dataset(
+            df=df,
+            filename=file.filename,
+            dataset_id=dataset_id,
+        )
+        
+        # Enqueue the background RAG ingestion pipeline
+        background_tasks.add_task(ingestion_pipeline.run_ingestion, dataset_id, df, file.filename)
+
+        logger.info(
+            "Dataset stored and ingestion queued",
+            extra={
+                "request_id": request_id,
+                "target_filename": file.filename,
+                "dataset_id": dataset_id,
+                "rows": df.shape[0],
+                "cols": df.shape[1],
+                "size_kb": round(len(contents) / 1024, 1),
+            },
+        )
+        return parsed_result
+
+    except ValueError as exc:
+        err_msg = str(exc)
+        logger.warning(
+            "Upload validation failed",
+            extra={"request_id": request_id, "target_filename": file.filename, "reason": err_msg},
+        )
+        status = 413 if "exceeds maximum allowed limit" in err_msg else 400
+        raise HTTPException(status_code=status, detail=err_msg)
     except HTTPException:
         raise
-    except Exception as e:
-        import traceback, sys
-        print(f"Upload endpoint unexpected error:\n{traceback.format_exc()}", file=sys.stderr)
-        raise HTTPException(status_code=500, detail="Internal server error during file upload")
+    except Exception as exc:
+        logger.exception(
+            "Unexpected upload error",
+            extra={"request_id": request_id, "target_filename": file.filename},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while processing the upload.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Filter
+# ---------------------------------------------------------------------------
 
 class FilterRequest(BaseModel):
     filters: Dict[str, Any]
-    filename: Optional[str] = None
+    dataset_id: Optional[str] = None   # Primary — preferred
+    filename: Optional[str] = None     # Backward-compatible alias
     data: Optional[List[Dict[str, Any]]] = None
 
-@app.post("/filter")
-async def filter_data(req: FilterRequest):
-    # Support both patterns: filename (with DATASTORE) or data (direct)
-    if req.filename:
-        if req.filename not in DATASTORE:
-            raise HTTPException(status_code=404, detail="File not found")
-        df = DATASTORE[req.filename]
-    elif req.data:
-        df = pd.DataFrame(req.data)
-    else:
-        raise HTTPException(status_code=400, detail="Either 'filename' or 'data' must be provided")
-    
-    for col, condition in req.filters.items():
-        if col not in df.columns:
-            continue
-        if isinstance(condition, dict) and "range" in condition:
-            lo, hi = condition["range"]
-            df = df[(df[col] >= lo) & (df[col] <= hi)]
-        else:
-            # equality or inclusion list
-            if isinstance(condition, list):
-                df = df[df[col].isin(condition)]
-            else:
-                df = df[df[col] == condition]
-    filtered = df.to_dict(orient="records")
-    summary = {
-        "row_count": len(df),
-        "filtered_data": filtered,
-    }
-    return JSONResponse(content=summary)
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        return sanitise_filters(v)
 
-@app.get("/stats/{filename}")
-async def get_stats(filename: str):
-    if filename not in DATASTORE:
-        raise HTTPException(status_code=404, detail="File not found")
-    df = DATASTORE[filename]
-    stats = {}
-    for col in df.columns:
-        col_series = df[col]
-        stats[col] = {
-            "nulls": int(col_series.isnull().sum()),
-            "unique": int(col_series.nunique()),
-            "top": col_series.mode().iloc[0] if not col_series.mode().empty else None,
-        }
-        if pd.api.types.is_numeric_dtype(col_series):
-            stats[col].update({
-                "mean": col_series.mean(),
-                "std": col_series.std(),
-                "min": col_series.min(),
-                "max": col_series.max(),
-            })
-    # Correlations among numeric columns only
-    numeric_cols = df.select_dtypes(include='number').columns
-    corr = df[numeric_cols].corr().fillna(0).to_dict()
-    return {"per_column_stats": stats, "correlations": corr}
+    @field_validator("dataset_id", "filename", mode="before")
+    @classmethod
+    def strip_ids(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if isinstance(v, str) else v
+
+
+@app.post("/filter")
+@_rate_limited(settings.rate_limit_default)
+async def filter_data(request: Request, req: FilterRequest) -> JSONResponse:
+    """Filter a stored dataset by criteria.
+
+    Supply ``dataset_id`` (preferred), legacy ``filename``, or inline ``data`` rows.
+    """
+    request_id = getattr(request.state, "request_id", "?")
+    lookup_key = req.dataset_id or req.filename
+
+    if lookup_key:
+        df = dataset_manager.get_dataset(lookup_key)
+        if df is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Dataset not found. Provide a valid 'dataset_id' returned from /upload.",
+            )
+        target_data = df
+    elif req.data is not None:
+        target_data = req.data
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide 'dataset_id', 'filename', or 'data' to filter.",
+        )
+
+    try:
+        summary = apply_filters(target_data, req.filters)
+        return JSONResponse(content=summary)
+    except Exception as exc:
+        logger.exception(
+            "Filter error",
+            extra={"request_id": request_id, "lookup_key": lookup_key},
+        )
+        raise HTTPException(status_code=400, detail="Failed to apply filter criteria.")
+
+
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
+@app.get("/stats/{dataset_id}")
+@_rate_limited(settings.rate_limit_default)
+async def get_stats(request: Request, dataset_id: str) -> Dict[str, Any]:
+    """Retrieve statistical summaries and correlation matrix for a stored dataset."""
+    request_id = getattr(request.state, "request_id", "?")
+
+    if not dataset_id or not dataset_id.strip():
+        raise HTTPException(status_code=400, detail="dataset_id must not be empty.")
+
+    df = dataset_manager.get_dataset(dataset_id.strip())
+    if df is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset '{dataset_id}' not found. Provide a valid dataset_id from /upload.",
+        )
+
+    try:
+        return calculate_dataset_stats(df)
+    except Exception as exc:
+        logger.exception(
+            "Stats computation error",
+            extra={"request_id": request_id, "dataset_id": dataset_id},
+        )
+        raise HTTPException(status_code=500, detail="Failed to compute dataset statistics.")
+
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
 
 class ChatMessage(BaseModel):
     role: str
     content: str
 
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in {"user", "assistant"}:
+            raise ValueError("Message role must be 'user' or 'assistant'.")
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Message content must not be empty.")
+        return v.strip()
+
+
 class ChatRequest(BaseModel):
     question: str
-    filename: str
+    dataset_id: Optional[str] = None   # Primary — preferred
+    filename: Optional[str] = None     # Backward-compatible alias
     history: List[ChatMessage] = Field(default_factory=list)
-    context_data: Dict[str, Any] | None = None
 
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        return sanitise_question(v)
 
-def format_numeric(value: float) -> str:
-    return f"{value:.4f}" if isinstance(value, float) else str(value)
+    @field_validator("history")
+    @classmethod
+    def validate_history(cls, v: List[ChatMessage]) -> List[ChatMessage]:
+        if len(v) > 100:
+            raise ValueError("History must not exceed 100 messages.")
+        return v
 
-
-def generate_local_answer(question: str, df: pd.DataFrame) -> str:
-    question_text = question.lower()
-    if 'summarize' in question_text or 'summary' in question_text:
-        return (
-            f"Dataset summary:\n- Rows: {df.shape[0]}\n- Columns: {df.shape[1]}\n"
-            f"- Column names: {', '.join(df.columns)}\n"
-            f"- Numeric columns: {', '.join([c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]) or 'none'}\n"
-            f"- Categorical columns: {', '.join([c for c in df.columns if pd.api.types.is_object_dtype(df[c])]) or 'none'}."
-        )
-
-    for col in df.columns:
-        if col.lower() in question_text:
-            if 'average' in question_text or 'mean' in question_text:
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    return f"The average of '{col}' is {format_numeric(df[col].mean())}."
-                return f"Column '{col}' is not numeric, so its average cannot be calculated."
-
-            if 'top' in question_text or 'most common' in question_text or 'highest' in question_text:
-                values = df[col].value_counts().head(5)
-                if values.empty:
-                    return f"No values found for column '{col}'."
-                formatted = ', '.join([f"{idx} ({count})" for idx, count in values.items()])
-                return f"Top values for '{col}': {formatted}."
-
-            if 'count' in question_text or 'how many' in question_text:
-                return f"Column '{col}' has {df[col].nunique()} unique values and {df[col].count()} non-null entries."
-
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    if 'average' in question_text or 'mean' in question_text:
-        if len(numeric_cols) == 1:
-            col = numeric_cols[0]
-            return f"The average of '{col}' is {format_numeric(df[col].mean())}."
-        if len(numeric_cols) > 1:
-            values = ', '.join([f"{c}: {format_numeric(df[c].mean())}" for c in numeric_cols])
-            return f"Averages by numeric column: {values}."
-
-    if 'top' in question_text or 'most common' in question_text:
-        target_columns = [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_numeric_dtype(df[c])]
-        if target_columns:
-            top_cols = ', '.join(target_columns[:3])
-            return f"I can highlight the most common values for columns like: {top_cols}. Please specify one of them."
-
-    return (
-        "I couldn't fully answer this question without the configured AI service, "
-        "but here is some dataset context you can use:\n"
-        f"- Rows: {df.shape[0]}\n- Columns: {df.shape[1]}\n"
-        f"- Columns: {', '.join(df.columns)}"
-    )
 
 @app.post("/chat")
-async def chat(req: ChatRequest):
-    if req.filename not in DATASTORE:
-        raise HTTPException(status_code=404, detail="File not found")
-    df = DATASTORE[req.filename]
-    # Build system prompt
-    rows, cols = df.shape
-    column_info = ", ".join([f"{c} ({str(df[c].dtype)})" for c in df.columns])
-    sample = df.head(10).to_dict(orient="records")
-    system_prompt = (
-        f"You are a data analyst assistant for 'DataLens Analytics'.\n"
-        f"The user has uploaded a dataset: '{req.filename}'\n"
-        f"- Dimensions: {rows} rows, {cols} columns\n"
-        f"- Columns: {column_info}\n"
-        f"- Data Sample: {json.dumps(sample)}\n\n"
-        f"Instructions:\n"
-        f"1. Be concise, professional, and helpful.\n"
-        f"2. Use the provided sample and metadata to answer questions.\n"
-        f"3. If you need to perform calculations not evident from the sample, explain how you would do it.\n"
-        f"4. If you don't know the answer or the data doesn't support it, say so."
+@_rate_limited(settings.rate_limit_chat)
+async def chat(request: Request, req: ChatRequest) -> Dict[str, str]:
+    """Process a natural language question about a stored dataset.
+
+    The dataset is retrieved internally from the DatasetManager by dataset_id.
+    The frontend sends only: question, dataset_id, history.
+    No dataset rows are transmitted on the wire.
+    """
+    request_id = getattr(request.state, "request_id", "?")
+    lookup_key = req.dataset_id or req.filename
+
+    if not lookup_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide 'dataset_id' (or legacy 'filename') to identify the dataset.",
+        )
+
+    df = dataset_manager.get_dataset(lookup_key.strip())
+    if df is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Dataset not found. Provide a valid dataset_id returned from /upload.",
+        )
+
+    meta = dataset_manager.get_metadata(lookup_key)
+    display_name = meta.get("filename", lookup_key) if meta else lookup_key
+    resolved_id = meta.get("dataset_id", lookup_key) if meta else lookup_key
+    history_dicts = [{"role": msg.role, "content": msg.content} for msg in req.history]
+
+    logger.info(
+        "Chat request",
+        extra={
+            "request_id": request_id,
+            "dataset_id": resolved_id,
+            "question_length": len(req.question),
+            "history_turns": len(history_dicts),
+        },
     )
 
-    # Construct the full prompt with history
-    conversation = ""
-    for msg in req.history:
-        role_label = "User" if msg.role == "user" else "Assistant"
-        conversation += f"{role_label}: {msg.content}\n"
-    
-    full_prompt = f"{system_prompt}\n\n{conversation}User: {req.question}\nAssistant:"
-
     try:
-        answer = call_qwen(full_prompt)
-    except Exception as e:
-        fallback = generate_local_answer(req.question, df)
-        print(f"LLM fallback: {e}")
-        return {
-            "answer": (
-                "The AI assistant backend is currently unavailable, so I am returning a local dataset response instead. "
-                f"\n\n{fallback}"
-            )
-        }
-    return {"answer": answer}
+        return await generate_chat_response_async(
+            question=req.question,
+            history=history_dicts,
+            data_or_df=df,
+            filename=display_name,
+            dataset_id=resolved_id,
+        )
+    except AIRateLimitError as exc:
+        logger.warning(
+            "AI rate limit",
+            extra={"request_id": request_id, "dataset_id": resolved_id},
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="AI backend is rate limiting requests. Please wait a moment and try again.",
+        )
+    except AIUnavailableError as exc:
+        logger.error(
+            "AI backend unavailable",
+            extra={"request_id": request_id, "dataset_id": resolved_id},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="AI backend is temporarily unavailable. Please try again shortly.",
+        )
+    except Exception as exc:
+        logger.exception(
+            "Unexpected chat error",
+            extra={"request_id": request_id, "dataset_id": resolved_id},
+        )
+        raise HTTPException(status_code=500, detail="Failed to process chat query.")
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health() -> Dict[str, Any]:
+    """Lightweight liveness probe — does not check external dependencies."""
+    return {
+        "status": "ok",
+        "env": settings.app_env,
+        "datasets_loaded": len(dataset_manager.list_datasets()),
+    }

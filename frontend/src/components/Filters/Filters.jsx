@@ -1,262 +1,283 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useData } from '../../context/DataContext';
 import { useFilters } from '../../hooks/useFilters';
+import { RefreshCw, ChevronDown, ChevronUp, Hash, Type, Calendar } from 'lucide-react';
 
 /**
- * Dynamic filter panel that generates controls based on column types.
- * - Categorical: multi‑select checkboxes (top 10 values + Select all / Clear)
- * - Numeric: min / max number inputs (simple replacement for dual‑handle slider)
- * - Date: start / end date inputs
- * Filters are applied with a 300 ms debounce to the backend.
+ * Dynamic filter panel — categorical checkboxes, numeric range, date range.
+ * Each column type is shown in a collapsible accordion card.
+ * Uses the design token system — no hardcoded old colours.
  */
 export default function Filters() {
   const { datasetInfo, rawData, filteredData } = useData();
-  const { clearFilter, resetFilters, filters, loading, error, applyFilters } = useFilters();
+  const { applyFilters, resetFilters, filters, loading, error } = useFilters();
 
   const [localFilters, setLocalFilters] = useState({});
-  const [debounceTimer, setDebounceTimer] = useState(null);
-  const hasInitializedFilters = useRef(false);
+  const [openSections, setOpenSections] = useState({});
+  const debounceRef = useRef(null);
+  const initialised = useRef(false);
 
-  const getNumericBounds = useCallback(
-    (col) => {
-      const values = rawData
-        .map((r) => Number(r[col]))
-        .filter((v) => !Number.isNaN(v));
-      if (!values.length) return null;
-      return [Math.min(...values), Math.max(...values)];
-    },
-    [rawData]
-  );
+  // ── Helpers ─────────────────────────────────────────────────────────────
+  const getNumericBounds = useCallback((col) => {
+    const vals = rawData.map((r) => Number(r[col])).filter((v) => !Number.isNaN(v));
+    return vals.length ? [Math.min(...vals), Math.max(...vals)] : null;
+  }, [rawData]);
 
-  // Initialise localFilters when datasetInfo changes
-  useEffect(() => {
-    if (!datasetInfo) return;
-    const init = {};
-    datasetInfo.numeric_columns?.forEach((col) => {
-      const bounds = getNumericBounds(col);
-      if (bounds) {
-        init[col] = { range: [String(bounds[0]), String(bounds[1])] };
-      }
-    });
-    datasetInfo.categorical_columns?.forEach((col) => {
-      init[col] = [];
-    });
-    datasetInfo.date_columns?.forEach((col) => {
-      init[col] = { range: ['', ''] };
-    });
-    setLocalFilters(init);
-    hasInitializedFilters.current = false;
-  }, [datasetInfo, getNumericBounds]);
-
-  // Build backend filter payload format expected by /filter endpoint
-  const buildPayload = useCallback(() => {
-    const payload = {};
-    Object.entries(localFilters).forEach(([col, val]) => {
-      if (Array.isArray(val) && val.length) {
-        payload[col] = val;
-        return;
-      }
-
-      if (val && typeof val === 'object' && val.range) {
-        const [lo, hi] = val.range;
-        if (datasetInfo?.numeric_columns?.includes(col)) {
-          const bounds = getNumericBounds(col);
-          const loNum = lo !== '' ? Number(lo) : bounds?.[0];
-          const hiNum = hi !== '' ? Number(hi) : bounds?.[1];
-          if (bounds && (lo !== '' || hi !== '') && (loNum !== bounds[0] || hiNum !== bounds[1])) {
-            payload[col] = { range: [loNum, hiNum] };
-          }
-        } else if (datasetInfo?.date_columns?.includes(col)) {
-          if (lo || hi) {
-            payload[col] = { range: [lo, hi] };
-          }
-        }
-      }
-    });
-    return payload;
-  }, [datasetInfo, localFilters, getNumericBounds]);
-
-  const apply = useCallback(() => {
-    if (!hasInitializedFilters.current) {
-      hasInitializedFilters.current = true;
-      return;
-    }
-
-    const payload = buildPayload();
-    applyFilters(payload);
-  }, [applyFilters, buildPayload]);
-
-  // Debounce handling - ONLY depend on localFilters to prevent timer reset when apply changes
-  useEffect(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    const timer = setTimeout(() => apply(), 300);
-    setDebounceTimer(timer);
-    return () => clearTimeout(timer);
-  }, [localFilters]);
-
-  // Memoized top values computation - avoid recalculation on every render
   const topValuesCache = useRef({});
   const topValues = useCallback((col) => {
-    if (topValuesCache.current[col]) {
-      return topValuesCache.current[col];
-    }
+    if (topValuesCache.current[col]) return topValuesCache.current[col];
     const counts = {};
-    const source = rawData.length ? rawData : filteredData;
-    source.forEach((row) => {
+    const src = rawData.length ? rawData : filteredData;
+    src.forEach((row) => {
       const v = row[col];
       if (v != null) counts[v] = (counts[v] || 0) + 1;
     });
     const result = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
-      .map((e) => e[0]);
+      .map(([k]) => k);
     topValuesCache.current[col] = result;
     return result;
   }, [rawData, filteredData]);
 
-  // Clear cache when data changes
-  useEffect(() => {
-    topValuesCache.current = {};
-  }, [rawData, filteredData]);
+  useEffect(() => { topValuesCache.current = {}; }, [rawData, filteredData]);
 
-  if (!datasetInfo) return <p className="p-4 text-slate">No dataset loaded.</p>;
+  // ── Initialise localFilters when dataset changes ─────────────────────────
+  useEffect(() => {
+    if (!datasetInfo) return;
+    const init = {};
+    const open = {};
+    datasetInfo.numeric_columns?.forEach((col) => {
+      const b = getNumericBounds(col);
+      if (b) init[col] = { range: [String(b[0]), String(b[1])] };
+      open[col] = false;
+    });
+    datasetInfo.categorical_columns?.forEach((col) => {
+      init[col] = [];
+      open[col] = false;
+    });
+    datasetInfo.date_columns?.forEach((col) => {
+      init[col] = { range: ['', ''] };
+      open[col] = false;
+    });
+    setLocalFilters(init);
+    setOpenSections(open);
+    initialised.current = false;
+  }, [datasetInfo, getNumericBounds]);
+
+  // ── Build backend payload ─────────────────────────────────────────────────
+  const buildPayload = useCallback(() => {
+    const payload = {};
+    Object.entries(localFilters).forEach(([col, val]) => {
+      if (Array.isArray(val) && val.length) {
+        payload[col] = val;
+      } else if (val && val.range) {
+        const [lo, hi] = val.range;
+        if (datasetInfo?.numeric_columns?.includes(col)) {
+          const bounds = getNumericBounds(col);
+          const loN = lo !== '' ? Number(lo) : bounds?.[0];
+          const hiN = hi !== '' ? Number(hi) : bounds?.[1];
+          if (bounds && (loN !== bounds[0] || hiN !== bounds[1])) {
+            payload[col] = { range: [loN, hiN] };
+          }
+        } else if (datasetInfo?.date_columns?.includes(col) && (lo || hi)) {
+          payload[col] = { range: [lo, hi] };
+        }
+      }
+    });
+    return payload;
+  }, [datasetInfo, localFilters, getNumericBounds]);
+
+  // ── Debounced apply ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!initialised.current) { initialised.current = true; return; }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => applyFilters(buildPayload()), 350);
+    return () => clearTimeout(debounceRef.current);
+  }, [localFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleSection = (col) =>
+    setOpenSections((p) => ({ ...p, [col]: !p[col] }));
+
+  // ── Empty state ────────────────────────────────────────────────────────────
+  if (!datasetInfo) {
+    return (
+      <div className="px-2 py-4 text-center space-y-1">
+        <p className="body-xs text-content-muted">Upload a dataset to see filters.</p>
+      </div>
+    );
+  }
+
+  const allColumns = [
+    ...(datasetInfo.categorical_columns || []).map((c) => ({ col: c, type: 'cat' })),
+    ...(datasetInfo.numeric_columns || []).map((c) => ({ col: c, type: 'num' })),
+    ...(datasetInfo.date_columns || []).map((c) => ({ col: c, type: 'date' })),
+  ];
+
+  if (!allColumns.length) {
+    return <p className="body-xs px-2 py-3 text-content-muted">No filterable columns found.</p>;
+  }
+
+  // ── Shared section wrapper ─────────────────────────────────────────────────
+  const Section = ({ col, type, children }) => {
+    const Icon = type === 'cat' ? Type : type === 'num' ? Hash : Calendar;
+    const isOpen = openSections[col];
+    return (
+      <div className="rounded-lg border border-surface-border overflow-hidden mb-1.5">
+        <button
+          type="button"
+          onClick={() => toggleSection(col)}
+          className="w-full flex items-center justify-between px-2.5 py-2
+                     hover:bg-surface-elevated transition-colors text-left"
+        >
+          <span className="flex items-center gap-2 body-xs font-semibold text-content-primary truncate">
+            <Icon className="w-3 h-3 text-brand-400 shrink-0" />
+            <span className="truncate">{col}</span>
+          </span>
+          {isOpen
+            ? <ChevronUp className="w-3 h-3 text-content-muted shrink-0" />
+            : <ChevronDown className="w-3 h-3 text-content-muted shrink-0" />
+          }
+        </button>
+        {isOpen && <div className="px-2.5 pb-2.5 pt-1 border-t border-surface-border bg-surface-elevated/30">{children}</div>}
+      </div>
+    );
+  };
 
   return (
-    <div className="h-full text-surface">
-      <h2 className="text-lg font-medium mb-4 sr-only">Filters</h2>
+    <div className="space-y-0.5">
+      {allColumns.map(({ col, type }) => (
+        <Section key={col} col={col} type={type}>
 
-      {/* Categorical filters */}
-      {datasetInfo.categorical_columns?.map((col) => (
-        <div key={col} className="mb-4">
-          <label className="block font-medium mb-1">{col}</label>
-          <div className="max-h-40 overflow-y-auto border border-slate rounded p-2 bg-navy">
-            {/* Select all / Clear */}
-            <div className="flex items-center mb-1">
-              <input
-                type="checkbox"
-                checked={
-                  localFilters[col] &&
-                  topValues(col).every((v) => localFilters[col].includes(v))
-                }
-                onChange={(e) => {
-                  const allVals = topValues(col);
-                  setLocalFilters((prev) => ({
-                    ...prev,
-                    [col]: e.target.checked ? allVals : [],
-                  }));
-                }}
-              />
-              <span className="ml-2 text-xs">Select all / Clear</span>
-            </div>
-            {topValues(col).map((v) => (
-              <div key={v} className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={localFilters[col]?.includes(v) || false}
-                  onChange={(e) => {
-                    const cur = localFilters[col] || [];
-                    setLocalFilters((prev) => ({
-                      ...prev,
-                      [col]: e.target.checked ? [...cur, v] : cur.filter((x) => x !== v),
-                    }));
-                  }}
-                />
-                <span className="ml-2 text-xs">{v}</span>
+          {/* ── Categorical ─────────────────────────────── */}
+          {type === 'cat' && (() => {
+            const vals = topValues(col);
+            const selected = localFilters[col] || [];
+            const allSelected = vals.length > 0 && vals.every((v) => selected.includes(v));
+            return (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pt-1">
+                {/* Select all row */}
+                <label className="flex items-center gap-2 px-1 py-0.5 rounded cursor-pointer hover:bg-surface-elevated transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(e) => {
+                      setLocalFilters((p) => ({ ...p, [col]: e.target.checked ? vals : [] }));
+                    }}
+                  />
+                  <span className="body-xs text-content-secondary font-medium">Select all</span>
+                </label>
+                <div className="w-full h-px bg-surface-border" />
+                {vals.map((v) => (
+                  <label key={v} className="flex items-center gap-2 px-1 py-0.5 rounded cursor-pointer hover:bg-surface-elevated transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(v)}
+                      onChange={(e) => {
+                        const cur = localFilters[col] || [];
+                        setLocalFilters((p) => ({
+                          ...p,
+                          [col]: e.target.checked
+                            ? [...cur, v]
+                            : cur.filter((x) => x !== v),
+                        }));
+                      }}
+                    />
+                    <span className="body-xs text-content-secondary truncate" title={v}>{v}</span>
+                  </label>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            );
+          })()}
+
+          {/* ── Numeric ─────────────────────────────────── */}
+          {type === 'num' && (() => {
+            const cur = localFilters[col]?.range || ['', ''];
+            const bounds = getNumericBounds(col);
+            return (
+              <div className="pt-1 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    placeholder={bounds ? String(bounds[0]) : 'Min'}
+                    value={cur[0]}
+                    onChange={(e) => setLocalFilters((p) => ({
+                      ...p, [col]: { range: [e.target.value, cur[1]] }
+                    }))}
+                    className="flex-1 min-w-0 px-2 py-1.5 rounded-lg body-xs text-content-primary
+                               bg-surface-bg border border-surface-border
+                               focus:border-brand-500 focus:outline-none transition-colors"
+                  />
+                  <span className="body-xs text-content-muted shrink-0">–</span>
+                  <input
+                    type="number"
+                    placeholder={bounds ? String(bounds[1]) : 'Max'}
+                    value={cur[1]}
+                    onChange={(e) => setLocalFilters((p) => ({
+                      ...p, [col]: { range: [cur[0], e.target.value] }
+                    }))}
+                    className="flex-1 min-w-0 px-2 py-1.5 rounded-lg body-xs text-content-primary
+                               bg-surface-bg border border-surface-border
+                               focus:border-brand-500 focus:outline-none transition-colors"
+                  />
+                </div>
+                {bounds && (
+                  <p className="body-xs text-content-muted">
+                    Range: {bounds[0].toLocaleString()} – {bounds[1].toLocaleString()}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ── Date ────────────────────────────────────── */}
+          {type === 'date' && (() => {
+            const cur = localFilters[col]?.range || ['', ''];
+            return (
+              <div className="pt-1 flex items-center gap-2">
+                <input
+                  type="date"
+                  value={cur[0]}
+                  onChange={(e) => setLocalFilters((p) => ({
+                    ...p, [col]: { range: [e.target.value, cur[1]] }
+                  }))}
+                  className="flex-1 min-w-0 px-2 py-1.5 rounded-lg body-xs text-content-primary
+                             bg-surface-bg border border-surface-border
+                             focus:border-brand-500 focus:outline-none transition-colors"
+                />
+                <span className="body-xs text-content-muted shrink-0">–</span>
+                <input
+                  type="date"
+                  value={cur[1]}
+                  onChange={(e) => setLocalFilters((p) => ({
+                    ...p, [col]: { range: [cur[0], e.target.value] }
+                  }))}
+                  className="flex-1 min-w-0 px-2 py-1.5 rounded-lg body-xs text-content-primary
+                             bg-surface-bg border border-surface-border
+                             focus:border-brand-500 focus:outline-none transition-colors"
+                />
+              </div>
+            );
+          })()}
+
+        </Section>
       ))}
 
-      {/* Numeric filters */}
-      {datasetInfo.numeric_columns?.map((col) => {
-        const cur = localFilters[col]?.range || ['', ''];
-        const values = rawData.map((r) => Number(r[col])).filter((v) => !isNaN(v));
-        const min = values.length ? Math.min(...values) : '';
-        const max = values.length ? Math.max(...values) : '';
-        return (
-          <div key={col} className="mb-4">
-            <label className="block font-medium mb-1">{col}</label>
-            <div className="flex space-x-2 items-center">
-              <input
-                type="number"
-                placeholder={min}
-                value={cur[0]}
-                onChange={(e) => {
-                  const lo = e.target.value;
-                  setLocalFilters((prev) => ({
-                    ...prev,
-                    [col]: { range: [lo, cur[1]] },
-                  }));
-                }}
-                className="w-1/2 bg-navy border border-slate rounded p-1"
-              />
-              <span className="text-xs">–</span>
-              <input
-                type="number"
-                placeholder={max}
-                value={cur[1]}
-                onChange={(e) => {
-                  const hi = e.target.value;
-                  setLocalFilters((prev) => ({
-                    ...prev,
-                    [col]: { range: [cur[0], hi] },
-                  }));
-                }}
-                className="w-1/2 bg-navy border border-slate rounded p-1"
-              />
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Date filters */}
-      {datasetInfo.date_columns?.map((col) => {
-        const cur = localFilters[col]?.range || ['', ''];
-        return (
-          <div key={col} className="mb-4">
-            <label className="block font-medium mb-1">{col}</label>
-            <div className="flex space-x-2 items-center">
-              <input
-                type="date"
-                value={cur[0]}
-                onChange={(e) => {
-                  setLocalFilters((prev) => ({
-                    ...prev,
-                    [col]: { range: [e.target.value, cur[1]] },
-                  }));
-                }}
-                className="w-1/2 bg-navy border border-slate rounded p-1"
-              />
-              <span className="text-xs">–</span>
-              <input
-                type="date"
-                value={cur[1]}
-                onChange={(e) => {
-                  setLocalFilters((prev) => ({
-                    ...prev,
-                    [col]: { range: [cur[0], e.target.value] },
-                  }));
-                }}
-                className="w-1/2 bg-navy border border-slate rounded p-1"
-              />
-            </div>
-          </div>
-        );
-      })}
-
-      <button
-        className="mt-4 px-3 py-1 bg-electric text-navy rounded hover:bg-electric/80"
-        onClick={resetFilters}
-        disabled={loading}
-      >
-        Reset all filters
-      </button>
-
-      {/* Reserve space for loading/error to prevent layout shift */}
-      <div className="mt-2 h-5">
-        {loading && <p className="text-sm">Applying filters…</p>}
-        {error && <p className="text-red-400 text-sm">{error}</p>}
+      {/* ── Footer: Reset + status ───────────────────────────────────────── */}
+      <div className="pt-2 space-y-1.5">
+        <button
+          onClick={resetFilters}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-1.5
+                     px-3 py-1.5 rounded-lg body-xs font-semibold
+                     border border-surface-border text-content-secondary
+                     hover:bg-surface-elevated hover:text-content-primary
+                     disabled:opacity-50 transition-all"
+        >
+          {loading && <RefreshCw className="w-3 h-3 animate-spin" />}
+          Reset all filters
+        </button>
+        {error && <p className="body-xs text-red-400 px-1">{error}</p>}
       </div>
     </div>
   );

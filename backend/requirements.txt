@@ -1,6 +1,19 @@
 # FastAPI backend requirements for DataLens Analytics
-fastapi[all]
-uvicorn[standard]
-pandas
-openpyxl
-httpx
+fastapi>=0.100.0,<1.0.0
+uvicorn[standard]>=0.20.0,<1.0.0
+pandas>=2.0.0,<3.0.0
+openpyxl>=3.1.0,<4.0.0
+httpx>=0.24.0,<1.0.0
+numpy>=1.24.0,<3.0.0
+python-multipart>=0.0.6
+
+# Structured logging (optional — falls back to plain text if absent)
+python-json-logger>=2.0.0,<4.0.0
+
+# Rate limiting (optional — degrades gracefully if absent)
+slowapi>=0.1.9,<1.0.0
+
+# RAG Ingestion Pipeline
+chromadb>=0.4.22
+sentence-transformers>=2.3.0
+tiktoken>=0.5.2

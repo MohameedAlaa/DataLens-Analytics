@@ -4,7 +4,7 @@ import { useData } from '../context/DataContext';
 
 // Hook to handle chat messages with the backend LLM endpoint
 export const useChat = () => {
-  const { datasetInfo, rawData, filteredData } = useData();
+  const { datasetInfo } = useData();
   const [messages, setMessages] = useState([]); // {role: 'user'|'assistant', content: string, timestamp: Date}
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -18,14 +18,8 @@ export const useChat = () => {
     async (question) => {
       const trimmedQuestion = question?.trim();
       if (!trimmedQuestion) return;
-      if (!datasetInfo?.filename) {
+      if (!datasetInfo?.dataset_id) {
         setError('No dataset loaded.');
-        return;
-      }
-
-      const dataset = filteredData.length ? filteredData : rawData;
-      if (!dataset.length) {
-        setError('Dataset is not available for chat.');
         return;
       }
 
@@ -36,11 +30,10 @@ export const useChat = () => {
 
       try {
         const history = messagesRef.current.map((m) => ({ role: m.role, content: m.content }));
-        const resp = await axios.post('/api/chat/', {
+        const resp = await axios.post('/api/chat', {
           question: trimmedQuestion,
-          filename: datasetInfo.filename,
+          dataset_id: datasetInfo.dataset_id,
           history,
-          dataset,
         });
         const assistantMsg = {
           role: 'assistant',
@@ -54,7 +47,7 @@ export const useChat = () => {
         setLoading(false);
       }
     },
-    [datasetInfo, rawData, filteredData]
+    [datasetInfo]
   );
 
   const resetChat = useCallback(() => {

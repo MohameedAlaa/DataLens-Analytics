@@ -1,15 +1,36 @@
+import collections
 import io
 import json
-from typing import Any, Dict, List
+import logging
+import math
+import uuid
+from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
 import pandas as pd
-from .AI import call_qwen
+try:
+    from AI import call_ai, call_ai_async
+except ImportError:
+    from .AI import call_ai, call_ai_async
+
+from services import InsightEngine
+
+logger = logging.getLogger(__name__)
+
+# Initialize single orchestrator engine for backend operations
+insight_engine = InsightEngine()
+
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB limit
+
+
+SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xls")
 
 
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
-    numeric = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    categorical = [c for c in df.columns if pd.api.types.is_object_dtype(df[c])]
-    date = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    """Categorize dataframe columns into numeric, categorical, and date groups."""
+    numeric = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    categorical = [str(c) for c in df.columns if pd.api.types.is_object_dtype(df[c])]
+    date = [str(c) for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
     return {
         "numeric_columns": numeric,
         "categorical_columns": categorical,
@@ -17,139 +38,593 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     }
 
 
-def format_numeric(value: Any) -> str:
-    return f"{value:.4f}" if isinstance(value, float) else str(value)
+def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
+    """Calculate numerical statistics, categorical summaries, and correlation matrix."""
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    categorical_cols = [c for c in df.columns if pd.api.types.is_object_dtype(df[c])]
+
+    numeric_summary = {}
+    if numeric_cols:
+        desc = df[numeric_cols].describe().to_dict()
+        for col in numeric_cols:
+            numeric_summary[str(col)] = {
+                "count": desc[col].get("count", 0),
+                "mean": None if pd.isna(desc[col].get("mean")) else float(desc[col]["mean"]),
+                "std": None if pd.isna(desc[col].get("std")) else float(desc[col]["std"]),
+                "min": None if pd.isna(desc[col].get("min")) else float(desc[col]["min"]),
+                "25%": None if pd.isna(desc[col].get("25%")) else float(desc[col]["25%"]),
+                "50%": None if pd.isna(desc[col].get("50%")) else float(desc[col]["50%"]),
+                "75%": None if pd.isna(desc[col].get("75%")) else float(desc[col]["75%"]),
+                "max": None if pd.isna(desc[col].get("max")) else float(desc[col]["max"]),
+            }
+
+    corr_matrix = {}
+    if len(numeric_cols) > 1:
+        corr_df = df[numeric_cols].corr().fillna(0)
+        corr_matrix = {str(c): corr_df[c].to_dict() for c in corr_df.columns}
+
+    categorical_summary = {}
+    for col in categorical_cols:
+        top_vals = df[col].value_counts().head(5).to_dict()
+        categorical_summary[str(col)] = {
+            "unique_count": int(df[col].nunique()),
+            "top_values": {str(k): int(v) for k, v in top_vals.items()},
+        }
+
+    return {
+        "row_count": len(df),
+        "column_count": len(df.columns),
+        "numeric_summary": numeric_summary,
+        "categorical_summary": categorical_summary,
+        "correlation_matrix": corr_matrix,
+    }
 
 
 def generate_local_answer(question: str, df: pd.DataFrame) -> str:
-    question_text = question.lower()
-    if 'summarize' in question_text or 'summary' in question_text:
-        return (
-            f"Dataset summary:\n- Rows: {df.shape[0]}\n- Columns: {df.shape[1]}\n"
-            f"- Column names: {', '.join(df.columns)}\n"
-            f"- Numeric columns: {', '.join([c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]) or 'none'}\n"
-            f"- Categorical columns: {', '.join([c for c in df.columns if pd.api.types.is_object_dtype(df[c])]) or 'none'}."
-        )
-
-    for col in df.columns:
-        if col.lower() in question_text:
-            if 'average' in question_text or 'mean' in question_text:
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    return f"The average of '{col}' is {format_numeric(df[col].mean())}."
-                return f"Column '{col}' is not numeric, so its average cannot be calculated."
-
-            if 'top' in question_text or 'most common' in question_text or 'highest' in question_text:
-                values = df[col].value_counts().head(5)
-                if values.empty:
-                    return f"No values found for column '{col}'."
-                formatted = ', '.join([f"{idx} ({count})" for idx, count in values.items()])
-                return f"Top values for '{col}': {formatted}."
-
-            if 'count' in question_text or 'how many' in question_text:
-                return f"Column '{col}' has {df[col].nunique()} unique values and {df[col].count()} non-null entries."
-
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    if 'average' in question_text or 'mean' in question_text:
-        if len(numeric_cols) == 1:
-            col = numeric_cols[0]
-            return f"The average of '{col}' is {format_numeric(df[col].mean())}."
-        if len(numeric_cols) > 1:
-            values = ', '.join([f"{c}: {format_numeric(df[c].mean())}" for c in numeric_cols])
-            return f"Averages by numeric column: {values}."
-
-    if 'top' in question_text or 'most common' in question_text:
-        target_columns = [c for c in df.columns if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_numeric_dtype(df[c])]
-        if target_columns:
-            top_cols = ', '.join(target_columns[:3])
-            return f"I can highlight the most common values for columns like: {top_cols}. Please specify one of them."
-
+    """Generate a simple local text summary of the dataset for fallback situations."""
+    rows, cols = df.shape
+    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
     return (
-        "I couldn't fully answer this question without the configured AI service, "
-        "but here is some dataset context you can use:\n"
-        f"- Rows: {df.shape[0]}\n- Columns: {df.shape[1]}\n"
-        f"- Columns: {', '.join(df.columns)}"
+        f"Dataset contains {rows} rows and {cols} columns.\n"
+        f"Numeric columns: {', '.join(num_cols) if num_cols else 'None'}.\n"
+        f"Sample head:\n{df.head(3).to_string()}"
     )
 
 
-def parse_dataset_bytes(contents: bytes, filename: str) -> Dict[str, Any]:
-    if filename.lower().endswith('.csv'):
-        df = pd.read_csv(io.BytesIO(contents))
-    else:
-        df = pd.read_excel(io.BytesIO(contents))
+def validate_file_size(contents: bytes, max_bytes: int = MAX_FILE_SIZE_BYTES) -> None:
+    """Validate that file content size does not exceed the allowed threshold."""
+    if len(contents) > max_bytes:
+        size_mb = len(contents) / (1024 * 1024)
+        max_mb = max_bytes / (1024 * 1024)
+        logger.warning("Upload size validation failed: %.2f MB exceeds limit of %.0f MB", size_mb, max_mb)
+        raise ValueError(f"File size ({size_mb:.1f} MB) exceeds maximum allowed limit of {max_mb:.0f} MB.")
 
-    cols = list(df.columns)
-    dtypes = {c: str(df[c].dtype) for c in cols}
-    preview = df.head(1000).to_dict(orient='records')
+
+
+def detect_csv_encoding(contents: bytes) -> str:
+    """Detect text encoding for CSV files by testing against standard candidate encodings."""
+    candidate_encodings = ["utf-8", "utf-8-sig", "latin-1", "cp1252", "iso-8859-1"]
+    sample = contents[:65536]  # 64 KB sample for rapid detection
+
+    for enc in candidate_encodings:
+        try:
+            sample.decode(enc)
+            contents.decode(enc)
+            logger.debug("Successfully detected CSV text encoding: '%s'", enc)
+            return enc
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    logger.warning("Could not determine exact CSV encoding; defaulting to utf-8")
+    return "utf-8"
+
+
+def parse_dataset_bytes(
+    contents: bytes,
+    filename: str,
+    preview_limit: int = 100,
+    max_bytes: int = MAX_FILE_SIZE_BYTES
+) -> Dict[str, Any]:
+    """Validate file size, format, encoding, headers, and contents, then parse into structured dictionary."""
+    # 1. File extension validation
+    if not filename or not filename.lower().endswith(SUPPORTED_EXTENSIONS):
+        ext = filename.split(".")[-1] if "." in filename else "unknown"
+        logger.warning("Upload rejected: Unsupported file type '.%s' for filename '%s'", ext, filename)
+        raise ValueError(f"Unsupported file type '.{ext}'. Please upload a CSV (.csv) or Excel (.xlsx, .xls) file.")
+
+    # 2. Maximum upload size check
+    validate_file_size(contents, max_bytes=max_bytes)
+
+    # 3. Empty file check
+    if not contents or len(contents.strip()) == 0:
+        logger.warning("Upload rejected: File '%s' is empty (0 bytes)", filename)
+        raise ValueError("Uploaded file is empty (0 bytes).")
+
+    filename_lower = filename.lower()
+    encoding = "utf-8"
+
+    # 4. File format and CSV/Excel parsing validation
+    try:
+        if filename_lower.endswith(".csv"):
+            encoding = detect_csv_encoding(contents)
+            try:
+                df = pd.read_csv(io.BytesIO(contents), encoding=encoding)
+            except pd.errors.EmptyDataError:
+                logger.warning("Upload rejected: Empty CSV file '%s'", filename)
+                raise ValueError("Uploaded CSV file is empty or contains no data rows.")
+            except pd.errors.ParserError as parse_err:
+                logger.warning("Upload rejected: CSV parsing error in '%s': %s", filename, parse_err)
+                raise ValueError("Failed to parse CSV file structure. Please ensure it is a valid CSV formatted file.")
+        else:
+            try:
+                df = pd.read_excel(io.BytesIO(contents))
+            except Exception as excel_err:
+                logger.warning("Upload rejected: Excel parsing error in '%s': %s", filename, excel_err)
+                raise ValueError("Failed to parse Excel file structure. Please ensure it is a valid .xlsx or .xls file.")
+
+    except ValueError:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error parsing upload '%s': %s", filename, exc)
+        raise ValueError("Could not parse or read the uploaded dataset file.")
+
+    # 5. Empty dataset checks (no rows or no columns)
+    if df.empty or df.shape[0] == 0:
+        logger.warning("Upload rejected: Dataset '%s' contains 0 data rows", filename)
+        raise ValueError("Uploaded file contains no data rows.")
+
+    if df.shape[1] == 0:
+        logger.warning("Upload rejected: Dataset '%s' contains 0 columns", filename)
+        raise ValueError("Uploaded file contains no column headers.")
+
+    # 6. Duplicate column detection
+    duplicates: List[str] = []
+    if filename_lower.endswith(".csv"):
+        try:
+            first_line = contents.decode(encoding, errors="ignore").splitlines()[0]
+            raw_headers = [c.strip().strip('"').strip("'") for c in first_line.split(",") if c.strip()]
+            seen_headers = set()
+            for header in raw_headers:
+                if header in seen_headers and header not in duplicates:
+                    duplicates.append(header)
+                seen_headers.add(header)
+        except Exception:
+            pass
+
+    if not duplicates:
+        col_names = [str(c) for c in df.columns]
+        seen_cols = set()
+        for c in col_names:
+            base_col = c.split(".")[0] if "." in c and c.split(".")[-1].isdigit() else c
+            if c in seen_cols:
+                duplicates.append(c)
+            seen_cols.add(c)
+
+    if duplicates:
+        dups_formatted = ", ".join([f"'{d}'" for d in set(duplicates)])
+        logger.warning("Upload rejected: Duplicate column names in '%s': %s", filename, dups_formatted)
+        raise ValueError(f"Duplicate column names detected in dataset: {dups_formatted}. All column headers must be unique.")
+
+    logger.info(
+        "Successfully validated and parsed '%s': %d rows, %d columns (size: %.2f KB, encoding: %s)",
+        filename, df.shape[0], df.shape[1], len(contents) / 1024, encoding
+    )
+
+    cols = [str(c) for c in df.columns]
+    dtypes = {str(c): str(df[c].dtype) for c in df.columns}
+
+    preview_df = df.head(preview_limit).copy()
+    for col in preview_df.select_dtypes(include=["datetime", "datetime64"]).columns:
+        preview_df[col] = preview_df[col].astype(str)
+
+    preview = preview_df.to_dict(orient="records")
     types = classify_columns(df)
+    dataset_id = str(uuid.uuid4())
+
     return {
-        'filename': filename,
-        'columns': cols,
-        'dtypes': dtypes,
-        'shape': df.shape,
-        'preview': preview,
+        "dataset_id": dataset_id,
+        "filename": filename,
+        "columns": cols,
+        "dtypes": dtypes,
+        "shape": list(df.shape),
+        "preview": preview,
         **types,
     }
 
 
+
+
+# ---------------------------------------------------------------------------
+# Typed error classes for AI chat failures
+# ---------------------------------------------------------------------------
+
+class AIUnavailableError(RuntimeError):
+    """AI backend is unreachable or returned a 5xx server error."""
+
+
+class AIRateLimitError(RuntimeError):
+    """AI backend enforced rate limiting (HTTP 429)."""
+
+
+# ---------------------------------------------------------------------------
+# Dataset context cache
+#
+# Building the system-prompt context (column stats + representative sample)
+# is CPU-intensive for large datasets. We cache the result per dataset_id
+# so it is computed exactly once and reused across every chat turn.
+#
+# Eviction: simple LRU with a hard cap — oldest entry removed when full.
+# ---------------------------------------------------------------------------
+
+_CONTEXT_CACHE_MAX = 100
+_context_cache: collections.OrderedDict = collections.OrderedDict()  # dataset_id -> context str
+
+# Maximum number of conversation turns kept in the prompt.
+# Older turns are dropped to prevent unbounded prompt growth.
+_MAX_HISTORY_TURNS = 10
+
+
+# ---------------------------------------------------------------------------
+# Legacy build_system_prompt (kept for callers that don't have a dataset_id)
+# ---------------------------------------------------------------------------
+
 def build_system_prompt(filename: str, df: pd.DataFrame) -> str:
+    """Build system prompt from schema + 10-row sample (legacy, no caching).
+
+    Prefer ``build_dataset_context`` / ``_build_system_prompt_v2`` for new
+    code — they cache the expensive stats computation per dataset_id.
+    """
     rows, cols = df.shape
     column_info = ", ".join([f"{c} ({str(df[c].dtype)})" for c in df.columns])
-    sample = df.head(10).to_dict(orient='records')
+    sample = df.head(10).to_dict(orient="records")
     return (
-        f"You are a data analyst assistant for 'DataLens Analytics'.\n"
+        "You are a data analyst assistant for 'DataLens Analytics'.\n"
         f"The user has uploaded a dataset: '{filename or 'dataset'}'\n"
         f"- Dimensions: {rows} rows, {cols} columns\n"
         f"- Columns: {column_info}\n"
-        f"- Data Sample: {json.dumps(sample)}\n\n"
-        f"Instructions:\n"
-        f"1. Be concise, professional, and helpful.\n"
-        f"2. Use the provided sample and metadata to answer questions.\n"
-        f"3. If you need to perform calculations not evident from the sample, explain how you would do it.\n"
-        f"4. If you don't know the answer or the data doesn't support it, say so."
+        f"- Data Sample: {json.dumps(sample, default=str)}\n\n"
+        "Instructions:\n"
+        "1. Be concise, professional, and helpful.\n"
+        "2. Use the provided sample and metadata to answer questions.\n"
+        "3. If you need to perform calculations not evident from the sample, explain how you would do it.\n"
+        "4. If you don't know the answer or the data doesn't support it, say so."
     )
 
 
-def apply_filters(data: List[Dict[str, Any]], filters: Dict[str, Any]) -> Dict[str, Any]:
-    df = pd.DataFrame(data)
+# ---------------------------------------------------------------------------
+# Smart context helpers (used by the cached v2 prompt builder)
+# ---------------------------------------------------------------------------
+
+def _build_column_stats(df: pd.DataFrame) -> str:
+    """Build a compact per-column statistics block for the AI context.
+
+    Numeric columns:  min / max / mean / null count
+    Datetime columns: min / max / null count
+    Categorical cols: unique count / top-3 values / null count
+    """
+    parts: List[str] = []
+    for col in df.columns:
+        series = df[col]
+        null_count = int(series.isna().sum())
+        dtype_str = str(series.dtype)
+
+        if pd.api.types.is_numeric_dtype(series):
+            non_null = series.dropna()
+            if len(non_null):
+                parts.append(
+                    f"  {col} ({dtype_str}): "
+                    f"min={non_null.min():.4g}, max={non_null.max():.4g}, "
+                    f"mean={non_null.mean():.4g}, nulls={null_count}"
+                )
+            else:
+                parts.append(f"  {col} ({dtype_str}): all null")
+
+        elif pd.api.types.is_datetime64_any_dtype(series):
+            non_null = series.dropna()
+            if len(non_null):
+                parts.append(
+                    f"  {col} (datetime): "
+                    f"min={non_null.min()}, max={non_null.max()}, nulls={null_count}"
+                )
+            else:
+                parts.append(f"  {col} (datetime): all null")
+
+        else:  # object / categorical
+            unique_count = series.nunique()
+            top = series.value_counts().head(3).index.tolist()
+            top_str = ", ".join([repr(v) for v in top])
+            parts.append(
+                f"  {col} ({dtype_str}): "
+                f"{unique_count} unique, top=[{top_str}], nulls={null_count}"
+            )
+
+    return "\n".join(parts)
+
+
+def _build_representative_sample(
+    df: pd.DataFrame, max_rows: int = 20
+) -> List[Dict[str, Any]]:
+    """Return a representative sample: head rows + random middle rows + tail rows.
+
+    For datasets smaller than max_rows, all rows are returned.
+    This gives the AI a better picture of data distribution than a plain
+    ``head()`` call, without sending the whole dataset.
+    """
+    n = len(df)
+    if n <= max_rows:
+        sample_df = df
+    else:
+        head_n = min(5, max_rows // 4)
+        tail_n = min(5, max_rows // 4)
+        mid_n = max_rows - head_n - tail_n
+        middle = df.iloc[head_n: n - tail_n]
+        if len(middle) > mid_n:
+            middle = middle.sample(mid_n, random_state=42)
+        sample_df = pd.concat([df.head(head_n), middle, df.tail(tail_n)])
+
+    # Serialize datetime columns so json.dumps doesn't fail
+    out = sample_df.copy()
+    for col in out.select_dtypes(include=["datetime", "datetime64"]).columns:
+        out[col] = out[col].astype(str)
+    return out.to_dict(orient="records")
+
+
+def build_dataset_context(dataset_id: str, df: pd.DataFrame, filename: str) -> str:
+    """Build and LRU-cache the dataset context string for the AI system prompt.
+
+    The context is keyed by ``dataset_id`` (UUID).  Because each UUID maps to
+    a single immutable upload, the cache never returns stale data — there is no
+    need to invalidate entries manually.
+
+    Args:
+        dataset_id: UUID assigned at upload time.
+        df:         Full dataset DataFrame (used only on cache miss).
+        filename:   Original filename for display in the prompt.
+
+    Returns:
+        A multi-line string describing the dataset schema, column statistics,
+        and a representative row sample.
+    """
+    if dataset_id in _context_cache:
+        _context_cache.move_to_end(dataset_id)   # refresh LRU position
+        return _context_cache[dataset_id]
+
+    rows, cols = df.shape
+    col_stats = _build_column_stats(df)
+    sample = _build_representative_sample(df, max_rows=20)
+
+    context = (
+        f"Dataset: '{filename}'\n"
+        f"Dimensions: {rows:,} rows × {cols} columns\n\n"
+        f"Column statistics:\n{col_stats}\n\n"
+        f"Representative sample ({len(sample)} rows):\n"
+        f"{json.dumps(sample, default=str)}"
+    )
+
+    _context_cache[dataset_id] = context
+    if len(_context_cache) > _CONTEXT_CACHE_MAX:
+        _context_cache.popitem(last=False)   # evict oldest entry
+
+    logger.debug(
+        "Built dataset context for dataset_id='%s' (%.1f KB, cached)",
+        dataset_id, len(context) / 1024,
+    )
+    return context
+
+
+def _build_system_prompt_v2(dataset_id: str, df: pd.DataFrame, filename: str) -> str:
+    """Build the full system prompt using the cached dataset context."""
+    context = build_dataset_context(dataset_id, df, filename)
+    return (
+        "You are a precise data analyst assistant for DataLens Analytics.\n"
+        "Answer questions about the dataset below using its column statistics and sample rows.\n"
+        "Be concise, professional, and grounded in the data. "
+        "When a question requires analysis beyond the visible sample, clearly explain your methodology.\n"
+        "If the data does not support a confident answer, say so explicitly.\n\n"
+        f"--- DATASET CONTEXT ---\n{context}\n--- END CONTEXT ---"
+    )
+
+
+def _format_history(history: List[Dict[str, str]], max_turns: int = _MAX_HISTORY_TURNS) -> str:
+    """Format conversation history as a role-labelled string, bounded by max_turns.
+
+    Older turns beyond the limit are silently dropped.  This keeps the prompt
+    within a predictable token budget regardless of conversation length.
+    """
+    if not history:
+        return ""
+    truncated = history[-max_turns:]
+    lines: List[str] = []
+    for msg in truncated:
+        role = msg.get("role", "user")
+        label = "User" if role == "user" else "Assistant"
+        lines.append(f"{label}: {msg.get('content', '').strip()}")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Filter helper (unrelated to chat — kept in place)
+# ---------------------------------------------------------------------------
+
+def apply_filters(
+    data_or_df: Union[pd.DataFrame, List[Dict[str, Any]]],
+    filters: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Apply dictionary filtering criteria to a DataFrame or row dictionaries."""
+    if isinstance(data_or_df, pd.DataFrame):
+        df = data_or_df.copy()
+    else:
+        df = pd.DataFrame(data_or_df)
+
     if df.empty:
-        return {'row_count': 0, 'filtered_data': []}
+        return {"row_count": 0, "filtered_data": []}
 
     for col, condition in filters.items():
         if col not in df.columns:
             continue
-        if isinstance(condition, dict) and 'range' in condition:
-            lo, hi = condition['range']
-            if pd.api.types.is_object_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            df = df[(df[col] >= lo) & (df[col] <= hi)]
+        if isinstance(condition, dict):
+            if "range" in condition:
+                lo, hi = condition["range"]
+                if pd.api.types.is_object_dtype(df[col]):
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                df = df[(df[col] >= lo) & (df[col] <= hi)]
+            else:
+                if pd.api.types.is_object_dtype(df[col]):
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                if "min" in condition:
+                    df = df[df[col] >= condition["min"]]
+                if "max" in condition:
+                    df = df[df[col] <= condition["max"]]
         else:
             if isinstance(condition, list):
                 df = df[df[col].isin(condition)]
             else:
                 df = df[df[col] == condition]
 
-    filtered = df.to_dict(orient='records')
-    return {'row_count': len(df), 'filtered_data': filtered}
+    filtered = df.to_dict(orient="records")
+    return {"row_count": len(filtered), "filtered_data": filtered}
 
 
-def generate_chat_response(question: str, history: List[Dict[str, str]], data: List[Dict[str, Any]], filename: str | None = None) -> Dict[str, str]:
+# ---------------------------------------------------------------------------
+# Chat response generators
+# ---------------------------------------------------------------------------
+
+async def generate_chat_response_async(
+    question: str,
+    history: List[Dict[str, str]],
+    data_or_df: Union[pd.DataFrame, List[Dict[str, Any]]],
+    filename: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+) -> Dict[str, str]:
+    """Asynchronously generate a chat response using the AI backend.
+
+    When ``dataset_id`` is supplied the dataset context (column statistics +
+    representative sample) is built once and reused on every subsequent call
+    for the same dataset — no repeated DataFrame traversal per turn.
+
+    Conversation history is bounded to the last ``_MAX_HISTORY_TURNS`` items
+    so the prompt stays within a predictable token budget.
+
+    Args:
+        question:    The user's current question.
+        history:     Prior conversation turns as {role, content} dicts.
+        data_or_df:  Full dataset as a DataFrame or list of row dicts.
+        filename:    Original filename shown in the AI context (display only).
+        dataset_id:  UUID key for context caching.  Always pass this when the
+                     dataset was loaded from the DatasetManager.
+
+    Returns:
+        ``{"answer": str}`` dict.
+
+    Raises:
+        AIUnavailableError: AI backend returned a 5xx or connection error.
+        AIRateLimitError:   AI backend enforced rate limiting (429).
+        ValueError:         Called with an empty dataset.
+    """
+    if isinstance(data_or_df, pd.DataFrame):
+        df = data_or_df
+    else:
+        if not data_or_df:
+            raise ValueError("Dataset rows must be provided for chat.")
+        df = pd.DataFrame(data_or_df)
+
+    # Choose prompt strategy: v2 (cached context) when dataset_id is available,
+    # otherwise fall back to the legacy head(10) prompt.
+    if dataset_id:
+        system_prompt = _build_system_prompt_v2(
+            dataset_id=dataset_id,
+            df=df,
+            filename=filename or "dataset",
+        )
+    else:
+        system_prompt = build_system_prompt(filename or "dataset", df)
+
+    conversation = _format_history(history)
+    full_prompt = f"{system_prompt}\n\n{conversation}User: {question}\nAssistant:"
+
+    session_key = dataset_id or str(uuid.uuid4())
+    try:
+        from dataset_manager import dataset_manager
+        meta = dataset_manager.get_metadata(dataset_id) if dataset_id else None
+        
+        # If the dataset is still indexing or failed, gracefully fall back to stats-based chat.
+        # Currently hardcoded to False for V1, but this structure ensures safety in future phases.
+        use_rag_flag = False
+        if meta and meta.get("indexing_status") == "READY":
+            # Future phases can enable use_rag_flag = True here
+            pass
+        elif meta and meta.get("indexing_status") != "READY":
+            logger.info("Dataset '%s' is not READY (status: %s). Falling back to basic chat.", dataset_id, meta.get("indexing_status"))
+        
+        # Route through newly structured modular InsightEngine facade
+        answer = await insight_engine.generate_chat_response(
+            question=question,
+            history=history,
+            system_prompt=system_prompt,
+            session_id=session_key,
+            use_rag=use_rag_flag,
+        )
+        return {"answer": answer}
+
+    except RuntimeError as exc:
+        msg = str(exc)
+        logger.warning(
+            "AI call failed for dataset_id='%s': %s",
+            dataset_id or "(no id)", msg,
+        )
+        # Map to typed errors so the endpoint can return the correct HTTP code
+        if "429" in msg or "rate" in msg.lower():
+            raise AIRateLimitError(msg) from exc
+        if any(code in msg for code in ("500", "502", "503")) or "connect" in msg.lower():
+            raise AIUnavailableError(msg) from exc
+        # Non-network generic failure: return a local fallback answer instead
+        fallback = generate_local_answer(question, df)
+        answer = (
+            "The AI assistant is temporarily unavailable. "
+            f"Here is a local dataset summary instead:\n\n{fallback}"
+        )
+        return {"answer": answer}
+
+    except Exception as exc:
+        logger.warning(
+            "Unexpected AI error for dataset_id='%s': %s",
+            dataset_id or "(no id)", exc,
+        )
+        fallback = generate_local_answer(question, df)
+        answer = (
+            "The AI assistant encountered an unexpected error. "
+            f"Here is a local dataset summary instead:\n\n{fallback}"
+        )
+        return {"answer": answer}
+
+
+def generate_chat_response(
+    question: str,
+    history: List[Dict[str, str]],
+    data: List[Dict[str, Any]],
+    filename: Optional[str] = None,
+) -> Dict[str, str]:
+    """Synchronous chat response generator — kept for backward compatibility.
+
+    New code should use ``generate_chat_response_async`` via ``await``.
+    """
     if not data:
-        raise ValueError('Dataset rows must be provided for chat.')
+        raise ValueError("Dataset rows must be provided for chat.")
 
     df = pd.DataFrame(data)
-    system_prompt = build_system_prompt(filename or 'dataset', df)
-    conversation = ''
-    for msg in history or []:
-        role_label = 'User' if msg.get('role') == 'user' else 'Assistant'
-        conversation += f"{role_label}: {msg.get('content')}\n"
-
+    system_prompt = build_system_prompt(filename or "dataset", df)
+    conversation = _format_history(history)
     full_prompt = f"{system_prompt}\n\n{conversation}User: {question}\nAssistant:"
 
     try:
-        answer = call_qwen(full_prompt)
-    except Exception:
+        answer = call_ai(full_prompt)
+    except Exception as exc:
+        logger.warning("Synchronous LLM call failed, using local fallback: %s", exc)
+        fallback = generate_local_answer(question, df)
         answer = (
-            "The AI assistant backend is currently unavailable, so I am returning a local dataset response instead. "
-            f"\n\n{generate_local_answer(question, df)}"
+            "The AI assistant is temporarily unavailable. "
+            f"Here is a local dataset summary instead:\n\n{fallback}"
         )
-    return {'answer': answer}
+
+    return {"answer": answer}
+

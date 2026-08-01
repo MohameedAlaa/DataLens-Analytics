@@ -1,25 +1,40 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useChat } from '../../hooks/useChat';
 import { useData } from '../../context/DataContext';
-import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-import { 
-  Send, 
-  X, 
-  MessageSquare, 
-  Trash2, 
-  Bot, 
-  User, 
+import {
+  Bot,
+  Send,
+  Trash2,
   Sparkles,
-  ChevronRight
+  HelpCircle,
+  FileText,
+  Database,
+  ExternalLink,
+  ChevronRight,
+  RefreshCw,
+  Zap,
+  Activity,
+  Layers,
+  MessageSquare
 } from 'lucide-react';
 
-export default function Chatbot() {
-  const [open, setOpen] = useState(false);
+export default function Chatbot({ externalPrompt }) {
   const { messages, sendMessage, resetChat, loading, error } = useChat();
   const { datasetInfo } = useData();
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (!externalPrompt) return;
+    const timer = setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.value = externalPrompt;
+        handleSend();
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [externalPrompt]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -38,166 +53,246 @@ export default function Chatbot() {
     await sendMessage(text);
   };
 
-  const suggestions = [];
-  if (datasetInfo) {
-    const cat = datasetInfo.categorical_columns?.[0];
-    const num = datasetInfo.numeric_columns?.[0];
-    if (cat) suggestions.push(`What are the top 5 values in ${cat}?`);
-    if (num) suggestions.push(`What is the average of ${num}?`);
-    suggestions.push('Summarize this dataset');
-  }
+  // Task 8: Context-aware dynamic suggested questions
+  const suggestedQuestions = useMemo(() => {
+    if (!datasetInfo) return [];
+    const questions = [];
+    const numCols = datasetInfo.numeric_columns || [];
+    const catCols = datasetInfo.categorical_columns || [];
+    const dateCols = datasetInfo.date_columns || [];
+
+    questions.push({ text: `Give me an executive summary of ${datasetInfo.filename}.`, icon: Sparkles });
+
+    if (numCols.length > 0) {
+      questions.push({ text: `What are the average, min, and max values of ${numCols[0]}?`, icon: Activity });
+    }
+    if (numCols.length >= 2) {
+      questions.push({ text: `Is there any correlation between ${numCols[0]} and ${numCols[1]}?`, icon: Zap });
+    }
+    if (catCols.length > 0) {
+      questions.push({ text: `How are records distributed across ${catCols[0]}?`, icon: Layers });
+    }
+    if (dateCols.length > 0) {
+      questions.push({ text: `What time trend is visible across ${dateCols[0]}?`, icon: Activity });
+    }
+    questions.push({ text: `Identify any data quality issues or missing values in this dataset.`, icon: HelpCircle });
+
+    return questions.slice(0, 5);
+  }, [datasetInfo]);
+
+  // Quick Action Buttons
+  const quickActions = [
+    { label: 'Summarize Trends', prompt: 'Summarize the key trends and patterns in this dataset.' },
+    { label: 'Find Outliers', prompt: 'Are there any statistical outliers or anomalies in the dataset?' },
+    { label: 'Check Quality', prompt: 'Perform a data quality audit and report missing or zero values.' },
+  ];
 
   return (
-    <>
-      <AnimatePresence>
-        {!open && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            className="fixed bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-xl shadow-cyan-500/25 transition-all hover:scale-110 z-50"
-            onClick={() => setOpen(true)}
-            aria-label="Open DataLens Assistant"
+    <aside className="hidden lg:flex w-80 xl:w-96 shrink-0 border-l border-surface-border bg-surface-card flex-col h-[calc(100vh-4rem)] sticky top-16 overflow-hidden">
+      {/* ── Header ── */}
+      <div className="p-3.5 border-b border-surface-border flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-brand-500/10 text-brand-400 border border-brand-500/20">
+            <Bot className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="heading-xs">AI Copilot</h2>
+            <p className="body-xs">Analytic Dataset Assistant</p>
+          </div>
+        </div>
+
+        {messages.length > 0 && (
+          <button
+            onClick={resetChat}
+            className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors"
+            title="Clear Chat History"
           >
-            <MessageSquare size={24} fill="currentColor" />
-          </motion.button>
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         )}
-      </AnimatePresence>
+      </div>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ y: '100%', opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: '100%', opacity: 0 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed bottom-6 right-6 w-[calc(100vw-3rem)] max-w-[400px] h-[600px] max-h-[calc(100vh-6rem)] bg-[#1A202C] rounded-[2rem] shadow-2xl z-50 flex flex-col overflow-hidden border border-slate-700/50"
-          >
-            {/* Header */}
-            <header className="flex items-start justify-between gap-4 p-6 pb-2">
-              <div className="flex items-center gap-3">
-                <div className="grid h-12 w-12 place-items-center rounded-3xl bg-slate-900/80 text-cyan-300 shadow-inner shadow-cyan-500/10">
-                  <Sparkles size={20} />
-                </div>
-                <div>
-                  <p className="text-slate-300 text-sm uppercase tracking-[0.35em]">DataLens Assistant</p>
-                  <p className="mt-2 text-sm text-slate-400">Instant analytics guidance for your dataset.</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {messages.length > 0 && (
-                  <button
-                    onClick={resetChat}
-                    className="rounded-2xl border border-slate-700/70 bg-slate-900/70 px-3 py-2 text-xs text-slate-300 transition-colors hover:bg-slate-800"
-                  >
-                    <Trash2 size={14} className="inline-block mr-2" />
-                    Clear
-                  </button>
-                )}
-                <button
-                  onClick={() => setOpen(false)}
-                  className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
-                  aria-label="Close assistant"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </header>
+      {/* ── Task 7: Dataset Context Summary Card ── */}
+      {datasetInfo ? (
+        <div className="p-3 bg-surface-elevated/40 border-b border-surface-border text-xs space-y-2 shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <Database className="w-3.5 h-3.5 text-brand-400 shrink-0" />
+              <span className="font-semibold text-content-primary truncate">{datasetInfo.filename}</span>
+            </div>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20 shrink-0">
+              {datasetInfo.shape?.[0]?.toLocaleString()} rows × {datasetInfo.shape?.[1]} cols
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] text-content-secondary">
+            <span>{datasetInfo.numeric_columns?.length || 0} numeric</span>
+            <span>•</span>
+            <span>{datasetInfo.categorical_columns?.length || 0} categorical</span>
+            {datasetInfo.date_columns?.length > 0 && (
+              <>
+                <span>•</span>
+                <span>{datasetInfo.date_columns.length} date</span>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="p-3 bg-surface-elevated/20 border-b border-surface-border text-xs text-content-muted flex items-center gap-2">
+          <Database className="w-3.5 h-3.5 opacity-50 shrink-0" />
+          <span>No dataset context loaded</span>
+        </div>
+      )}
 
-            {/* Chat Area */}
-            <div 
-              ref={scrollRef}
-              className="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth custom-scrollbar"
-            >
-              {messages.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-center space-y-6 opacity-90">
-                  <Bot size={44} className="text-cyan-400" />
-                  <div className="space-y-2">
-                    <p className="text-lg font-semibold text-slate-100">Ready to analyze your dataset</p>
-                    <p className="max-w-sm text-sm text-slate-400">Ask about trends, averages, top values, or request a concise summary.</p>
-                  </div>
-                  <div className="grid gap-3 px-4 w-full">
-                    {suggestions.map((s, i) => (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          inputRef.current.value = s;
-                          handleSend();
-                        }}
-                        className="w-full rounded-3xl border border-slate-700/60 bg-slate-900/80 px-4 py-3 text-left text-sm text-slate-200 transition hover:border-cyan-400/40 hover:bg-slate-800"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {messages.map((msg, idx) => (
-                <motion.div
-                  key={idx}
-                  initial={{ y: 10, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  className={`flex ${msg.role === 'assistant' ? 'justify-start' : 'justify-end'}`}
-                >
-                  <div className={`px-5 py-4 rounded-[1.75rem] text-sm leading-relaxed max-w-[85%] shadow-sm ${
-                    msg.role === 'assistant'
-                      ? 'bg-slate-900/90 text-slate-100 ring-1 ring-slate-700/50 rounded-tl-none'
-                      : 'bg-gradient-to-r from-emerald-400 to-cyan-300 text-slate-950 font-semibold rounded-br-none'
-                  }`}>
-                    <ReactMarkdown components={{p: ({node, ...props}) => <p {...props} />}}>
-                      {msg.content}
-                    </ReactMarkdown>
-                  </div>
-                </motion.div>
-              ))}
-
-              {loading && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
-                  <div className="px-5 py-3 bg-[#2D3748] rounded-[1.75rem] rounded-tl-none flex gap-1 items-center">
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                  </div>
-                </motion.div>
-              )}
-
-              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-xs text-center">
-                  {error}
-                </div>
-              )}
+      {/* ── Main Conversation & Recommendations Scroll Area ── */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3.5 space-y-4 custom-scrollbar">
+        {messages.length === 0 ? (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-xl border border-surface-border bg-surface-elevated/30 text-center space-y-1.5">
+              <Sparkles className="w-5 h-5 text-brand-400 mx-auto" />
+              <h3 className="heading-xs">Ready to Analyze</h3>
+              <p className="body-xs">
+                Ask natural language questions about dataset distributions, correlations, or anomalies.
+              </p>
             </div>
 
-            {/* Input Area */}
-            <div className="p-6 pt-2">
-              <form onSubmit={(e)=>{e.preventDefault(); handleSend();}} className="flex gap-3">
-                <div className="relative flex-1">
-                  <input
-                    ref={inputRef}
-                    disabled={loading || !datasetInfo}
-                    placeholder={datasetInfo ? 'Ask about insights, averages, trends, or categories...' : 'Upload a dataset first to start querying'}
-                    className="w-full bg-slate-900/90 border border-slate-800 text-slate-100 text-sm rounded-[1.5rem] px-5 py-4 focus:outline-none focus:ring-2 focus:ring-cyan-400/40 transition-all placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
+            {/* Task 7: Quick Actions */}
+            {datasetInfo && (
+              <div className="space-y-2">
+                <p className="label-caps flex items-center gap-1.5">
+                  <Zap className="w-3 h-3 text-brand-400" />
+                  Quick Actions
+                </p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {quickActions.map((act, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        if (inputRef.current) {
+                          inputRef.current.value = act.prompt;
+                          handleSend();
+                        }
+                      }}
+                      className="p-2 rounded-lg border border-surface-border bg-surface-elevated/50 hover:bg-surface-elevated hover:border-brand-500/30 text-[10px] font-semibold text-content-secondary hover:text-content-primary transition-all text-center"
+                    >
+                      {act.label}
+                    </button>
+                  ))}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={loading || !datasetInfo}
-                  className={`inline-flex items-center gap-2 whitespace-nowrap rounded-[1.5rem] border border-cyan-400/20 px-5 py-3 text-sm font-semibold transition-all ${
-                    loading || !datasetInfo
-                      ? 'bg-slate-800 text-slate-500 border-slate-700'
-                      : 'bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 shadow-lg shadow-cyan-500/20 hover:scale-[1.01]'
+              </div>
+            )}
+
+            {/* Task 7 & 8: Context-aware Suggested Questions */}
+            <div className="space-y-2">
+              <p className="label-caps flex items-center gap-1.5">
+                <HelpCircle className="w-3 h-3 text-brand-400" />
+                Suggested Questions
+              </p>
+              <div className="space-y-1.5">
+                {suggestedQuestions.length > 0 ? (
+                  suggestedQuestions.map((q, idx) => {
+                    const QIcon = q.icon;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          if (inputRef.current) {
+                            inputRef.current.value = q.text;
+                            handleSend();
+                          }
+                        }}
+                        className="w-full text-left p-2.5 rounded-xl border border-surface-border bg-surface-elevated/40 hover:bg-surface-elevated hover:border-brand-500/30 transition-all flex items-start gap-2.5 group"
+                      >
+                        <QIcon className="w-3.5 h-3.5 text-brand-400 shrink-0 mt-0.5" />
+                        <span className="body-xs text-content-secondary group-hover:text-content-primary transition-colors flex-1 leading-snug">
+                          {q.text}
+                        </span>
+                        <ChevronRight className="w-3.5 h-3.5 text-content-muted group-hover:text-brand-400 transition-colors shrink-0 mt-0.5" />
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="body-xs text-content-muted text-center py-2">
+                    Upload a dataset to generate context-aware questions.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {/* Recent Conversation turns header */}
+            <div className="flex items-center justify-between pb-1 border-b border-surface-border/50">
+              <span className="label-caps flex items-center gap-1">
+                <MessageSquare className="w-3 h-3 text-brand-400" />
+                Conversation History ({messages.length} messages)
+              </span>
+            </div>
+
+            {messages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+              >
+                <div
+                  className={`p-3 rounded-2xl body-xs leading-relaxed max-w-[92%] shadow-sm ${
+                    msg.role === 'user'
+                      ? 'bg-brand-500 text-white rounded-br-none font-medium'
+                      : 'bg-surface-elevated border border-surface-border text-content-primary rounded-tl-none space-y-2'
                   }`}
                 >
-                  {loading ? 'Sending...' : <><Send size={16} /> Send</>}
-                </button>
-              </form>
-            </div>
-          </motion.div>
+                  <ReactMarkdown components={{ p: ({ node, ...props }) => <p {...props} /> }}>
+                    {msg.content}
+                  </ReactMarkdown>
+
+                  {/* Analysis Citation Footer */}
+                  {msg.role === 'assistant' && (
+                    <div className="mt-2 pt-2 border-t border-surface-border/50 text-[10px] text-content-muted flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <FileText className="w-3 h-3 text-brand-400" /> Dataset Analysis Result
+                      </span>
+                      <span className="text-brand-400 hover:underline cursor-pointer flex items-center gap-0.5">
+                        Citation <ExternalLink className="w-2.5 h-2.5" />
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
-      </AnimatePresence>
-    </>
+
+        {loading && (
+          <div className="flex items-center gap-2 p-3 bg-surface-elevated border border-surface-border rounded-2xl rounded-tl-none w-fit body-xs text-content-secondary">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand-400" />
+            <span>Analyzing dataset...</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl body-xs">
+            {error}
+          </div>
+        )}
+      </div>
+
+      {/* ── Input Area ── */}
+      <div className="p-3 border-t border-surface-border shrink-0">
+        <form onSubmit={handleSend} className="flex gap-2">
+          <input
+            ref={inputRef}
+            disabled={loading || !datasetInfo}
+            placeholder={datasetInfo ? 'Ask AI Copilot about dataset...' : 'Upload dataset to start querying'}
+            className="flex-1 bg-surface-elevated border border-surface-border text-content-primary body-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-500 placeholder:text-content-muted disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={loading || !datasetInfo}
+            className="px-3.5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white body-xs font-semibold shadow-sm shadow-brand-500/20 transition-all disabled:opacity-50 flex items-center justify-center shrink-0"
+          >
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </form>
+      </div>
+    </aside>
   );
 }
-
