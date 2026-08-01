@@ -6,6 +6,14 @@ import math
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
+from services.ai.rag.citation_builder import CitationBuilder
+from services.ai.rag.prompt_builder import PromptBuilder
+from services.ai.rag.query_router import QueryRouter
+from services.ai.rag.retriever import Retriever
+from services.ai.rag.llm_service import RagLLMService
+from services.data.vector_store import ChromaVectorStore
+from services.ai.embeddings.embedding_service import SentenceTransformerEmbeddingService
+
 import numpy as np
 import pandas as pd
 try:
@@ -19,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 # Initialize single orchestrator engine for backend operations
 insight_engine = InsightEngine()
+
+# RAG orchestration helpers
+_query_router = QueryRouter()
+_prompt_builder = PromptBuilder()
+_citation_builder = CitationBuilder()
+
+_MAX_RAG_TOP_K = 3
 
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB limit
 
@@ -442,6 +457,33 @@ def _format_history(history: List[Dict[str, str]], max_turns: int = _MAX_HISTORY
     return "\n".join(lines) + "\n"
 
 
+def build_query_router() -> QueryRouter:
+    return _query_router
+
+
+def build_retriever() -> Retriever:
+    try:
+        return Retriever(
+            vector_store=ChromaVectorStore(),
+            embedding_service=SentenceTransformerEmbeddingService(),
+        )
+    except Exception as exc:
+        logger.warning("Unable to initialize retriever: %s", exc)
+        return Retriever(vector_store=ChromaVectorStore(), embedding_service=SentenceTransformerEmbeddingService())
+
+
+def build_prompt_builder() -> PromptBuilder:
+    return _prompt_builder
+
+
+def build_citation_builder() -> CitationBuilder:
+    return _citation_builder
+
+
+def build_llm_service() -> RagLLMService:
+    return RagLLMService()
+
+
 # ---------------------------------------------------------------------------
 # Filter helper (unrelated to chat — kept in place)
 # ---------------------------------------------------------------------------
@@ -546,16 +588,44 @@ async def generate_chat_response_async(
     try:
         from dataset_manager import dataset_manager
         meta = dataset_manager.get_metadata(dataset_id) if dataset_id else None
-        
-        # If the dataset is still indexing or failed, gracefully fall back to stats-based chat.
-        # Currently hardcoded to False for V1, but this structure ensures safety in future phases.
-        use_rag_flag = False
-        if meta and meta.get("indexing_status") == "READY":
-            # Future phases can enable use_rag_flag = True here
-            pass
+
+        router = build_query_router()
+        routing = router.route(question=question, df=df, history=history, filename=filename)
+
+        use_rag_flag = bool(routing.get("needs_retrieval"))
+        if meta and meta.get("indexing_status") == "READY" and use_rag_flag:
+            logger.info("Dataset '%s' is READY and routing requested retrieval; using RAG orchestration.", dataset_id)
         elif meta and meta.get("indexing_status") != "READY":
             logger.info("Dataset '%s' is not READY (status: %s). Falling back to basic chat.", dataset_id, meta.get("indexing_status"))
-        
+            use_rag_flag = False
+
+        if use_rag_flag:
+            try:
+                retriever = build_retriever()
+                retrieved_chunks = retriever.retrieve(
+                    query=question,
+                    dataset_id=dataset_id or session_key,
+                    top_k=routing.get("retrieval_top_k", _MAX_RAG_TOP_K),
+                )
+                prompt_builder = build_prompt_builder()
+                citation_builder = build_citation_builder()
+                llm_service = build_llm_service()
+                citations = citation_builder.build(retrieved_chunks)
+                prompt = prompt_builder.build(
+                    question=question,
+                    system_prompt=system_prompt,
+                    history=history,
+                    retrieved_chunks=retrieved_chunks,
+                    citations=citations,
+                    dataset_context=build_dataset_context(dataset_id, df, filename or "dataset") if dataset_id else None,
+                )
+                answer = await llm_service.generate(prompt)
+                if not answer:
+                    answer = generate_local_answer(question, df)
+                return {"answer": answer, "citations": citations}
+            except Exception as exc:
+                logger.warning("RAG orchestration failed for dataset '%s': %s", dataset_id or session_key, exc)
+
         # Route through newly structured modular InsightEngine facade
         answer = await insight_engine.generate_chat_response(
             question=question,
