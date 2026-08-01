@@ -57,11 +57,11 @@ export default function Chatbot({ externalPrompt }) {
   const suggestedQuestions = useMemo(() => {
     if (!datasetInfo) return [];
     const questions = [];
-    const numCols = datasetInfo.numeric_columns || [];
-    const catCols = datasetInfo.categorical_columns || [];
-    const dateCols = datasetInfo.date_columns || [];
+    const numCols = Array.isArray(datasetInfo?.numeric_columns) ? datasetInfo.numeric_columns : [];
+    const catCols = Array.isArray(datasetInfo?.categorical_columns) ? datasetInfo.categorical_columns : [];
+    const dateCols = Array.isArray(datasetInfo?.date_columns) ? datasetInfo.date_columns : [];
 
-    questions.push({ text: `Give me an executive summary of ${datasetInfo.filename}.`, icon: Sparkles });
+    questions.push({ text: `Give me an executive summary of ${datasetInfo?.filename || 'the uploaded dataset'}.`, icon: Sparkles });
 
     if (numCols.length > 0) {
       questions.push({ text: `What are the average, min, and max values of ${numCols[0]}?`, icon: Activity });
@@ -118,17 +118,17 @@ export default function Chatbot({ externalPrompt }) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <Database className="w-3.5 h-3.5 text-brand-400 shrink-0" />
-              <span className="font-semibold text-content-primary truncate">{datasetInfo.filename}</span>
+              <span className="font-semibold text-content-primary truncate">{datasetInfo?.filename || 'Uploaded dataset'}</span>
             </div>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20 shrink-0">
-              {datasetInfo.shape?.[0]?.toLocaleString()} rows × {datasetInfo.shape?.[1]} cols
+              {(datasetInfo?.shape?.[0] ?? 0).toLocaleString()} rows × {datasetInfo?.shape?.[1] ?? 0} cols
             </span>
           </div>
           <div className="flex items-center gap-2 text-[10px] text-content-secondary">
-            <span>{datasetInfo.numeric_columns?.length || 0} numeric</span>
+            <span>{Array.isArray(datasetInfo?.numeric_columns) ? datasetInfo.numeric_columns.length : 0} numeric</span>
             <span>•</span>
-            <span>{datasetInfo.categorical_columns?.length || 0} categorical</span>
-            {datasetInfo.date_columns?.length > 0 && (
+            <span>{Array.isArray(datasetInfo?.categorical_columns) ? datasetInfo.categorical_columns.length : 0} categorical</span>
+            {Array.isArray(datasetInfo?.date_columns) && datasetInfo.date_columns.length > 0 && (
               <>
                 <span>•</span>
                 <span>{datasetInfo.date_columns.length} date</span>

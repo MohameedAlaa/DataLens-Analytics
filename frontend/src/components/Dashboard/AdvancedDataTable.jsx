@@ -33,8 +33,10 @@ export default function AdvancedDataTable() {
   const [showColMenu, setShowColMenu] = useState(false);
 
   const allColumns = useMemo(() => {
-    if (rows.length > 0) return Object.keys(rows[0]);
-    return datasetInfo?.columns || [];
+    if (rows.length > 0 && rows[0] && typeof rows[0] === 'object') {
+      return Object.keys(rows[0]);
+    }
+    return Array.isArray(datasetInfo?.columns) ? datasetInfo.columns : [];
   }, [rows, datasetInfo]);
 
   const visibleColumns = useMemo(() => {

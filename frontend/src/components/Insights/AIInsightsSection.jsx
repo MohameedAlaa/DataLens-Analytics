@@ -5,8 +5,8 @@ import {
   Sparkles, TrendingUp, AlertTriangle, Lightbulb, Activity, ArrowRight,
   ShieldCheck, CheckCircle2, AlertCircle, XCircle, Database, Hash, Type,
   Calendar, Grid, BarChart3, Layers, ScatterChart, PieChart, LineChart,
-  TrendingDown, Zap, Eye, HelpCircle, ChevronDown, ChevronUp, Flame,
-  Droplets, Triangle, GitBranch
+  TrendingDown, Zap, Eye, HelpCircle, ChevronDown, ChevronUp, ChevronRight,
+  Flame, Droplets, Triangle, GitBranch
 } from 'lucide-react';
 
 // ─── Pure computation helpers (all memoized) ──────────────────────────────
@@ -249,15 +249,19 @@ export default function AIInsightsSection({ onPromptSelect }) {
   const derived = useMemo(() => {
     if (!datasetInfo || !stats) return null;
 
-    const rowCount = stats.row_count ?? datasetInfo.shape?.[0] ?? 0;
-    const colCount = stats.column_count ?? datasetInfo.shape?.[1] ?? 0;
+    const rowCount = Number(stats?.row_count ?? datasetInfo?.shape?.[0] ?? 0) || 0;
+    const colCount = Number(stats?.column_count ?? datasetInfo?.shape?.[1] ?? 0) || 0;
     const totalCells = rowCount * colCount;
-    const numericSummary = stats.numeric_summary || {};
-    const catSummary = stats.categorical_summary || {};
-    const corrMatrix = stats.correlation_matrix || {};
-    const numericCols = datasetInfo.numeric_columns || Object.keys(numericSummary);
-    const catCols = datasetInfo.categorical_columns || Object.keys(catSummary);
-    const dateColsCount = datasetInfo.date_columns?.length || 0;
+    const numericSummary = stats?.numeric_summary || {};
+    const catSummary = stats?.categorical_summary || {};
+    const corrMatrix = stats?.correlation_matrix || {};
+    const numericCols = Array.isArray(datasetInfo?.numeric_columns) && datasetInfo.numeric_columns.length > 0
+      ? datasetInfo.numeric_columns
+      : Object.keys(numericSummary);
+    const catCols = Array.isArray(datasetInfo?.categorical_columns) && datasetInfo.categorical_columns.length > 0
+      ? datasetInfo.categorical_columns
+      : Object.keys(catSummary);
+    const dateColsCount = Array.isArray(datasetInfo?.date_columns) ? datasetInfo.date_columns.length : 0;
 
     // Null stats from numeric summary (count vs rowCount)
     const { nullPerCol, totalNull } = computeNullStats(numericSummary, rowCount);

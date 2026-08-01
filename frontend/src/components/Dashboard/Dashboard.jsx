@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  ComposedChart, BoxPlot,
+  ComposedChart,
 } from 'recharts';
 import {
   TrendingUp, PieChart as PieIcon, BarChart3, ScatterChart as ScatterIcon,
@@ -598,6 +598,43 @@ function SectionHeader({ icon: Icon, label }) {
   );
 }
 
+function AnalyticsSummaryCards({ rows, numericColumns, catColumns }) {
+  const stats = [
+    {
+      label: 'Rows analyzed',
+      value: rows.length.toLocaleString(),
+      hint: rows.length ? 'live filtered view' : 'no rows yet',
+    },
+    {
+      label: 'Numeric fields',
+      value: numericColumns.length.toString(),
+      hint: numericColumns.length ? 'trend + distribution ready' : 'no numeric candidates',
+    },
+    {
+      label: 'Categorical fields',
+      value: catColumns.length.toString(),
+      hint: catColumns.length ? 'segments + proportions ready' : 'fallback views enabled',
+    },
+    {
+      label: 'Layout mode',
+      value: '2 × 2',
+      hint: 'responsive analytics grid',
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      {stats.map((stat) => (
+        <div key={stat.label} className="rounded-2xl border border-surface-border bg-surface-card p-3.5 shadow-sm">
+          <p className="body-xs text-content-muted">{stat.label}</p>
+          <p className="mt-1 text-lg font-semibold text-content-primary">{stat.value}</p>
+          <p className="mt-1 body-xs text-content-secondary">{stat.hint}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── MAIN DASHBOARD ────────────────────────────────────────────────────────────
 export default memo(function Dashboard() {
   const { datasetInfo, filteredData } = useData();
@@ -612,23 +649,33 @@ export default memo(function Dashboard() {
   if (!datasetInfo) return <DashboardEmpty />;
 
   return (
-    <div className="space-y-6">
+    <div id="analytics" className="space-y-6">
+      <div id="overview" className="h-0 w-full" />
 
-      {/* ── ROW 1: Trend + Histogram ────────────────────────────────────────── */}
-      {hasNumeric && (
-        <div className="space-y-3">
-          <SectionHeader icon={TrendingUp} label="Trend & Distribution" />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <NumericTrendChart rows={rows} numericColumns={numericColumns} />
-            <HistogramChart rows={rows} numericColumns={numericColumns} />
-          </div>
-        </div>
-      )}
-
-      {/* ── ROW 2: Scatter + Categorical / Fallback ─────────────────────────── */}
       <div className="space-y-3">
-        <SectionHeader icon={ScatterIcon} label="Relationships & Segments" />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <SectionHeader icon={Grid3x3} label="Analytics Overview" />
+        <AnalyticsSummaryCards rows={rows} numericColumns={numericColumns} catColumns={catColumns} />
+      </div>
+
+      <div id="visualizations" className="space-y-3">
+        <SectionHeader icon={BarChart3} label="Core Visualizations" />
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          {hasNumeric ? (
+            <NumericTrendChart rows={rows} numericColumns={numericColumns} />
+          ) : (
+            <div className="p-5 rounded-2xl border border-surface-border bg-surface-card body-xs text-content-secondary flex items-center justify-center italic">
+              No numeric columns available for trend analysis.
+            </div>
+          )}
+
+          {hasNumeric ? (
+            <HistogramChart rows={rows} numericColumns={numericColumns} />
+          ) : (
+            <div className="p-5 rounded-2xl border border-surface-border bg-surface-card body-xs text-content-secondary flex items-center justify-center italic">
+              No numeric columns available for histograms.
+            </div>
+          )}
+
           {hasMultiNum ? (
             <ScatterPlotChart rows={rows} numericColumns={numericColumns} />
           ) : hasNumeric ? (
@@ -642,7 +689,6 @@ export default memo(function Dashboard() {
           {hasCat ? (
             <CategoricalBarChart rows={rows} catColumns={catColumns} />
           ) : hasNumeric ? (
-            // Fallback: second histogram on different column
             <HistogramChart rows={rows} numericColumns={[...numericColumns].reverse()} />
           ) : (
             <div className="p-5 rounded-2xl border border-surface-border bg-surface-card body-xs text-content-secondary flex items-center justify-center italic">
@@ -652,10 +698,9 @@ export default memo(function Dashboard() {
         </div>
       </div>
 
-      {/* ── ROW 3: Pie + Box Plot ────────────────────────────────────────────── */}
       <div className="space-y-3">
         <SectionHeader icon={PieIcon} label="Proportions & Spread" />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           {hasCat ? (
             <PieChartCard rows={rows} catColumns={catColumns} />
           ) : hasNumeric ? (
@@ -670,18 +715,16 @@ export default memo(function Dashboard() {
         </div>
       </div>
 
-      {/* ── ROW 4: Correlation Heatmap + Radar ──────────────────────────────── */}
       {hasMultiNum && (
         <div className="space-y-3">
           <SectionHeader icon={GitBranch} label="Correlations & Profiles" />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <CorrelationHeatmap rows={rows} numericColumns={numericColumns} />
             <RadarProfileChart rows={rows} numericColumns={numericColumns} />
           </div>
         </div>
       )}
 
-      {/* ── Dataset Browser ──────────────────────────────────────────────────── */}
       <div id="dataset" className="space-y-3">
         <SectionHeader icon={TableIcon} label="Filtered Dataset Browser" />
         <AdvancedDataTable />

@@ -47,16 +47,16 @@ export default function Filters() {
     if (!datasetInfo) return;
     const init = {};
     const open = {};
-    datasetInfo.numeric_columns?.forEach((col) => {
+    (Array.isArray(datasetInfo?.numeric_columns) ? datasetInfo.numeric_columns : []).forEach((col) => {
       const b = getNumericBounds(col);
       if (b) init[col] = { range: [String(b[0]), String(b[1])] };
       open[col] = false;
     });
-    datasetInfo.categorical_columns?.forEach((col) => {
+    (Array.isArray(datasetInfo?.categorical_columns) ? datasetInfo.categorical_columns : []).forEach((col) => {
       init[col] = [];
       open[col] = false;
     });
-    datasetInfo.date_columns?.forEach((col) => {
+    (Array.isArray(datasetInfo?.date_columns) ? datasetInfo.date_columns : []).forEach((col) => {
       init[col] = { range: ['', ''] };
       open[col] = false;
     });
@@ -109,9 +109,9 @@ export default function Filters() {
   }
 
   const allColumns = [
-    ...(datasetInfo.categorical_columns || []).map((c) => ({ col: c, type: 'cat' })),
-    ...(datasetInfo.numeric_columns || []).map((c) => ({ col: c, type: 'num' })),
-    ...(datasetInfo.date_columns || []).map((c) => ({ col: c, type: 'date' })),
+    ...((Array.isArray(datasetInfo?.categorical_columns) ? datasetInfo.categorical_columns : []).map((c) => ({ col: c, type: 'cat' }))),
+    ...((Array.isArray(datasetInfo?.numeric_columns) ? datasetInfo.numeric_columns : []).map((c) => ({ col: c, type: 'num' }))),
+    ...((Array.isArray(datasetInfo?.date_columns) ? datasetInfo.date_columns : []).map((c) => ({ col: c, type: 'date' }))),
   ];
 
   if (!allColumns.length) {

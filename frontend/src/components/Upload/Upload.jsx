@@ -52,7 +52,7 @@ export default function Upload() {
           <div className="mt-4 rounded-3xl bg-white/5 px-4 py-3 text-left text-sm text-slate/80">
             <p className="font-semibold text-surface">Current file</p>
             <p className="mt-2">{datasetInfo.filename}</p>
-            <p className="mt-1">Rows: {datasetInfo.shape[0]}, Columns: {datasetInfo.shape[1]}</p>
+            <p className="mt-1">Rows: {datasetInfo?.shape?.[0] ?? 0}, Columns: {datasetInfo?.shape?.[1] ?? 0}</p>
           </div>
         )}
       </div>

@@ -23,10 +23,21 @@ export const DataProvider = ({ children }) => {
       form.append('file', file);
       // Let the browser set the Content-Type (and boundary) automatically.
       const resp = await axios.post('/api/upload', form);
-      const info = resp.data;
-      setDatasetInfo(info);
+      const info = resp.data || {};
+      const normalizedInfo = {
+        ...info,
+        filename: info.filename || 'uploaded_dataset',
+        shape: Array.isArray(info.shape) ? info.shape : [0, 0],
+        columns: Array.isArray(info.columns) ? info.columns : [],
+        dtypes: info.dtypes || {},
+        numeric_columns: Array.isArray(info.numeric_columns) ? info.numeric_columns : [],
+        categorical_columns: Array.isArray(info.categorical_columns) ? info.categorical_columns : [],
+        date_columns: Array.isArray(info.date_columns) ? info.date_columns : [],
+        preview: Array.isArray(info.preview) ? info.preview : [],
+      };
+      setDatasetInfo(normalizedInfo);
       // Store first 20000 rows for UI
-      const previewRows = info.preview || [];
+      const previewRows = normalizedInfo.preview;
       setRawData(previewRows);
       setFilteredData(previewRows);
     } catch (e) {
