@@ -28,7 +28,7 @@ services:
       - key: GOOGLE_API_KEY
         sync: false  # Injected securely via Render Dashboard environment secrets
       - key: CORS_ORIGINS
-        sync: false  # Configure with your production frontend URL (e.g. https://datalens-frontend.onrender.com)
+        sync: false  # Configure with your production Vercel frontend URL (e.g. https://datalens-analytics.vercel.app)
       - key: CORS_ALLOW_CREDENTIALS
         value: "false"
       - key: RATE_LIMIT_UPLOAD
