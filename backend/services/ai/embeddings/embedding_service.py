@@ -41,3 +41,13 @@ class SentenceTransformerEmbeddingService(BaseEmbeddingService):
         # sentence-transformers outputs numpy arrays, convert to lists of floats
         embeddings = self.model.encode(texts, show_progress_bar=False)
         return embeddings.tolist()
+
+
+_global_embedding_service = None
+
+def get_embedding_service() -> BaseEmbeddingService:
+    """Get the global application-scoped embedding service instance."""
+    global _global_embedding_service
+    if _global_embedding_service is None:
+        _global_embedding_service = SentenceTransformerEmbeddingService()
+    return _global_embedding_service

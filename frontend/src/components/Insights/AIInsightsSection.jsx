@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
 import axios from 'axios';
+import { extractErrorMessage } from '../../utils/apiClient';
 import {
   Sparkles, TrendingUp, AlertTriangle, Lightbulb, Activity, ArrowRight,
   ShieldCheck, CheckCircle2, AlertCircle, XCircle, Database, Hash, Type,
@@ -219,31 +220,59 @@ export default function AIInsightsSection({ onPromptSelect }) {
   const toggleSection = (key) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   useEffect(() => {
-    if (!datasetInfo?.dataset_id) { setStats(null); return; }
+    const datasetId = datasetInfo?.dataset_id;
+    if (!datasetId) {
+      setStats(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const abortController = new AbortController();
     let cancelled = false;
+
     const fetchStats = async () => {
-      setLoading(true); setError(null);
+      setLoading(true);
+      setError(null);
       try {
-        const resp = await axios.get(`/api/stats/${datasetInfo.dataset_id}`);
-        if (!cancelled) setStats(resp.data);
+        const resp = await axios.get(`/api/stats/${datasetId}`, {
+          signal: abortController.signal,
+        });
+        if (!cancelled) {
+          setStats(resp.data);
+        }
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || axios.isCancel(err) || err.name === 'CanceledError' || err.name === 'AbortError') {
+          return;
+        }
         if (err.response?.status === 404) {
           // Dataset no longer exists in backend (server restarted and wiped in-memory store).
           // Clear the stale datasetInfo so the user is prompted to re-upload.
           setDatasetInfo(null);
           setStats(null);
           setError(null);
+        } else if (err.response?.status === 409) {
+          // Ingestion in progress; retry after brief delay
+          setTimeout(() => {
+            if (!cancelled) fetchStats();
+          }, 1500);
         } else {
-          setError('Could not load dataset statistics from the backend.');
+          setError(extractErrorMessage(err, 'Could not load dataset statistics from the backend.'));
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
+
     fetchStats();
-    return () => { cancelled = true; };
-  }, [datasetInfo]);
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, [datasetInfo?.dataset_id, setDatasetInfo]);
 
   // ── All computations memoized ──────────────────────────────────────────
   const derived = useMemo(() => {

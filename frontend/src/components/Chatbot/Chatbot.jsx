@@ -16,10 +16,12 @@ import {
   Zap,
   Activity,
   Layers,
-  MessageSquare
+  MessageSquare,
+  X,
+  AlertCircle
 } from 'lucide-react';
 
-export default function Chatbot({ externalPrompt }) {
+export default function Chatbot({ externalPrompt, isOpenMobile = false, onCloseMobile }) {
   const { messages, sendMessage, resetChat, loading, error } = useChat();
   const { datasetInfo } = useData();
   const inputRef = useRef(null);
@@ -53,7 +55,7 @@ export default function Chatbot({ externalPrompt }) {
     await sendMessage(text);
   };
 
-  // Task 8: Context-aware dynamic suggested questions
+  // Context-aware dynamic suggested questions
   const suggestedQuestions = useMemo(() => {
     if (!datasetInfo) return [];
     const questions = [];
@@ -88,7 +90,16 @@ export default function Chatbot({ externalPrompt }) {
   ];
 
   return (
-    <aside className="hidden lg:flex w-80 xl:w-96 shrink-0 border-l border-surface-border bg-surface-card flex-col h-[calc(100vh-4rem)] sticky top-16 overflow-hidden">
+    <aside
+      className={`
+        bg-surface-card flex flex-col overflow-hidden border-surface-border transition-all
+        ${
+          isOpenMobile
+            ? 'fixed inset-0 z-50 flex lg:hidden bg-surface-bg'
+            : 'hidden lg:flex w-80 xl:w-96 shrink-0 border-l h-[calc(100vh-4rem)] sticky top-16'
+        }
+      `}
+    >
       {/* ── Header ── */}
       <div className="p-3.5 border-b border-surface-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
@@ -101,18 +112,32 @@ export default function Chatbot({ externalPrompt }) {
           </div>
         </div>
 
-        {messages.length > 0 && (
-          <button
-            onClick={resetChat}
-            className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors"
-            title="Clear Chat History"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {messages.length > 0 && (
+            <button
+              onClick={resetChat}
+              className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors"
+              title="Clear Chat History"
+              aria-label="Clear Chat History"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {isOpenMobile && onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors lg:hidden"
+              title="Close Copilot"
+              aria-label="Close Copilot"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Task 7: Dataset Context Summary Card ── */}
+      {/* ── Dataset Context Summary Card ── */}
       {datasetInfo ? (
         <div className="p-3 bg-surface-elevated/40 border-b border-surface-border text-xs space-y-2 shrink-0">
           <div className="flex items-center justify-between">
@@ -155,7 +180,7 @@ export default function Chatbot({ externalPrompt }) {
               </p>
             </div>
 
-            {/* Task 7: Quick Actions */}
+            {/* Quick Actions */}
             {datasetInfo && (
               <div className="space-y-2">
                 <p className="label-caps flex items-center gap-1.5">
@@ -181,7 +206,7 @@ export default function Chatbot({ externalPrompt }) {
               </div>
             )}
 
-            {/* Task 7 & 8: Context-aware Suggested Questions */}
+            {/* Context-aware Suggested Questions */}
             <div className="space-y-2">
               <p className="label-caps flex items-center gap-1.5">
                 <HelpCircle className="w-3 h-3 text-brand-400" />
@@ -220,11 +245,11 @@ export default function Chatbot({ externalPrompt }) {
           </div>
         ) : (
           <div className="space-y-3">
-            {/* Recent Conversation turns header */}
+            {/* Conversation History turns header */}
             <div className="flex items-center justify-between pb-1 border-b border-surface-border/50">
               <span className="label-caps flex items-center gap-1">
                 <MessageSquare className="w-3 h-3 text-brand-400" />
-                Conversation History ({messages.length} messages)
+                Conversation History ({messages.length} message{messages.length !== 1 ? 's' : ''})
               </span>
             </div>
 
@@ -244,15 +269,54 @@ export default function Chatbot({ externalPrompt }) {
                     {msg.content}
                   </ReactMarkdown>
 
-                  {/* Analysis Citation Footer */}
-                  {msg.role === 'assistant' && (
-                    <div className="mt-2 pt-2 border-t border-surface-border/50 text-[10px] text-content-muted flex items-center justify-between">
-                      <span className="flex items-center gap-1">
-                        <FileText className="w-3 h-3 text-brand-400" /> Dataset Analysis Result
-                      </span>
-                      <span className="text-brand-400 hover:underline cursor-pointer flex items-center gap-0.5">
-                        Citation <ExternalLink className="w-2.5 h-2.5" />
-                      </span>
+                  {/* Deterministic Analytics Badge */}
+                  {msg.analytics && (
+                    <div className="mt-2 p-2 rounded-lg bg-brand-500/10 border border-brand-500/20 text-[10px] space-y-1">
+                      <div className="flex items-center justify-between text-brand-400 font-bold uppercase tracking-wider">
+                        <span className="flex items-center gap-1">
+                          <Zap className="w-3 h-3 text-brand-400" /> Deterministic Analytics
+                        </span>
+                        <span>{msg.analytics.operation || 'Calculation'}</span>
+                      </div>
+                      <div className="text-content-primary font-semibold">
+                        {msg.analytics.group_value ? `${msg.analytics.group_value}: ` : ''}
+                        {typeof msg.analytics.value === 'number'
+                          ? msg.analytics.value.toLocaleString()
+                          : String(msg.analytics.value ?? '')}
+                        {msg.analytics.column ? ` (${msg.analytics.column})` : ''}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Real Citations Breakdown */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-surface-border/50 text-[10px]">
+                      <details className="group/cit">
+                        <summary className="text-brand-400 hover:underline cursor-pointer flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <FileText className="w-3 h-3 text-brand-400" />
+                            {msg.citations.length} Verified Citation{msg.citations.length > 1 ? 's' : ''}
+                          </span>
+                          <ChevronRight className="w-3 h-3 transition-transform group-open/cit:rotate-90" />
+                        </summary>
+                        <div className="mt-1.5 space-y-1.5 pl-2 border-l border-brand-500/30 text-[10px] text-content-secondary max-h-36 overflow-y-auto custom-scrollbar">
+                          {msg.citations.map((c, cIdx) => (
+                            <div key={cIdx} className="bg-surface-card p-1.5 rounded border border-surface-border">
+                              <span className="font-semibold text-content-primary">
+                                Row {c.row_index ?? cIdx + 1}:
+                              </span>{' '}
+                              <span>{c.snippet || JSON.stringify(c)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+                  )}
+
+                  {/* Standard Footnote if neither analytics nor citations */}
+                  {msg.role === 'assistant' && !msg.analytics && (!msg.citations || msg.citations.length === 0) && (
+                    <div className="mt-2 pt-1 border-t border-surface-border/40 text-[10px] text-content-muted flex items-center gap-1">
+                      <Bot className="w-3 h-3 text-brand-400" /> Synthesized from dataset context
                     </div>
                   )}
                 </div>
@@ -269,8 +333,9 @@ export default function Chatbot({ externalPrompt }) {
         )}
 
         {error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl body-xs">
-            {error}
+          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl body-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="flex-1">{error}</span>
           </div>
         )}
       </div>
@@ -282,11 +347,13 @@ export default function Chatbot({ externalPrompt }) {
             ref={inputRef}
             disabled={loading || !datasetInfo}
             placeholder={datasetInfo ? 'Ask AI Copilot about dataset...' : 'Upload dataset to start querying'}
+            aria-label="Ask AI Copilot about dataset"
             className="flex-1 bg-surface-elevated border border-surface-border text-content-primary body-xs rounded-xl px-3 py-2 focus:outline-none focus:border-brand-500 placeholder:text-content-muted disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={loading || !datasetInfo}
+            aria-label="Send message"
             className="px-3.5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white body-xs font-semibold shadow-sm shadow-brand-500/20 transition-all disabled:opacity-50 flex items-center justify-center shrink-0"
           >
             <Send className="w-3.5 h-3.5" />

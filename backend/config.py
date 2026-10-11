@@ -36,6 +36,7 @@ def _load_dotenv(env_path: Path) -> None:
                 os.environ[key] = value
 
 
+_load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 _load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
@@ -58,13 +59,21 @@ class _Settings:
 
     # --- AI / Google ---
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
-    ai_model: str = os.getenv("AI_MODEL", "gemini-1.5-flash")
-    ai_api_url: str = os.getenv(
-        "AI_API_URL",
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{os.getenv('AI_MODEL', 'gemini-1.5-flash')}:generateContent"
-        f"?key={os.getenv('GOOGLE_API_KEY', '')}",
-    )
+    ai_model: str = os.getenv("AI_MODEL", "gemini-2.5-flash")
+
+    @property
+    def ai_api_url(self) -> str:
+        override = os.getenv("AI_API_URL")
+        if override:
+            return override
+        return f"https://generativelanguage.googleapis.com/v1beta/models/{self.ai_model}:generateContent"
+
+    # --- Vector database ---
+    chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
+
+    # --- Dataset storage engine ---
+    storage_engine: str = os.getenv("STORAGE_ENGINE", "memory").lower()
+    dataset_storage_dir: str = os.getenv("DATASET_STORAGE_DIR", "./dataset_storage")
 
     # --- Upload limits ---
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_MB", "50")) * 1024 * 1024
@@ -72,15 +81,29 @@ class _Settings:
 
     # --- CORS ---
     # Comma-separated list.  Use "*" only during local dev; set explicit
-    # origins in production via CORS_ORIGINS env var.
-    cors_origins: List[str] = _env_list("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    # origins in production via CORS_ORIGINS or CORS_ALLOWED_ORIGINS env var.
+    cors_origins: List[str] = _env_list("CORS_ORIGINS", os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173"))
     cors_allow_credentials: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
+
+    def __init__(self):
+        # Validate CORS in production
+        if self.is_production and "*" in self.cors_origins:
+            raise ValueError("Wildcard CORS origins (*) are not permitted in production.")
+        if self.cors_allow_credentials and "*" in self.cors_origins:
+            raise ValueError("CORS credentials are not permitted with wildcard origins.")
 
     # --- Rate limiting ---
     # Uses slowapi token-bucket semantics: N requests per window per IP.
     rate_limit_upload: str = os.getenv("RATE_LIMIT_UPLOAD", "10/minute")
     rate_limit_chat: str = os.getenv("RATE_LIMIT_CHAT", "30/minute")
+    rate_limit_filter: str = os.getenv("RATE_LIMIT_FILTER", "120/minute")
     rate_limit_default: str = os.getenv("RATE_LIMIT_DEFAULT", "60/minute")
+
+    # --- Proxy / Trusted IPs ---
+    # Comma-separated list of trusted reverse proxy IP addresses.
+    # When empty (default), forwarding headers (X-Forwarded-For, X-Real-IP) are untrusted
+    # to prevent IP spoofing attacks and rate limit bypasses.
+    trusted_proxies: List[str] = _env_list("TRUSTED_PROXIES", "")
 
     # --- Logging ---
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()

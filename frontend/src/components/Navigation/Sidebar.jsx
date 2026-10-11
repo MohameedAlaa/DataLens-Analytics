@@ -2,7 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard, Sparkles, LineChart, PieChart,
   Table, Bot, FileText, Settings, Filter,
-  ChevronDown, ChevronRight, Lock,
+  ChevronDown, ChevronRight, Lock, X
 } from 'lucide-react';
 import Filters from '../Filters/Filters';
 
@@ -27,18 +27,24 @@ const NAV_SECTIONS = [
   },
 ];
 
-export default function Sidebar({ activeTab, setActiveTab }) {
+export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false, onCloseMobile }) {
   const [filtersOpen, setFiltersOpen] = React.useState(true);
 
-  return (
-    <aside
-      className="hidden md:flex w-60 lg:w-64 shrink-0 flex-col
-                 border-r border-surface-border bg-surface-card
-                 h-[calc(100vh-4rem)] sticky top-16 overflow-hidden"
-    >
-      {/* ── Navigation Groups ─────────────────────────────── */}
-      <div className="overflow-y-auto custom-scrollbar">
-        {NAV_SECTIONS.map((section) => (
+  const sidebarContent = (
+    <div className="overflow-y-auto custom-scrollbar flex-1">
+      {isOpenMobile && (
+        <div className="p-3 border-b border-surface-border flex items-center justify-between md:hidden">
+          <span className="heading-xs text-content-primary">Menu & Filters</span>
+          <button
+            onClick={onCloseMobile}
+            aria-label="Close menu"
+            className="p-1 rounded-lg text-content-muted hover:text-content-primary hover:bg-surface-elevated"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+      {NAV_SECTIONS.map((section) => (
           <div key={section.label} className="p-3 pb-1">
             <p className="label-caps px-2 mb-1.5">{section.label}</p>
             <nav className="space-y-0.5">
@@ -49,7 +55,12 @@ export default function Sidebar({ activeTab, setActiveTab }) {
                   <button
                     key={item.id}
                     disabled={item.disabled}
-                    onClick={() => !item.disabled && setActiveTab(item.id)}
+                    onClick={() => {
+                      if (!item.disabled) {
+                        setActiveTab(item.id);
+                        if (onCloseMobile) onCloseMobile();
+                      }
+                    }}
                     className={`
                       w-full flex items-center justify-between
                       px-2.5 py-2 rounded-lg body-xs font-medium
@@ -110,6 +121,28 @@ export default function Sidebar({ activeTab, setActiveTab }) {
           )}
         </div>
       </div>
-    </aside>
+  );
+
+  return (
+    <>
+      {/* Desktop Sidebar */}
+      <aside
+        className="hidden md:flex w-60 lg:w-64 shrink-0 flex-col
+                   border-r border-surface-border bg-surface-card
+                   h-[calc(100vh-4rem)] sticky top-16 overflow-hidden"
+      >
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile Drawer */}
+      {isOpenMobile && (
+        <div className="fixed inset-0 z-50 flex md:hidden bg-black/60 backdrop-blur-sm">
+          <div className="w-72 max-w-[85vw] h-full bg-surface-card border-r border-surface-border flex flex-col shadow-2xl">
+            {sidebarContent}
+          </div>
+          <div className="flex-1" onClick={onCloseMobile} />
+        </div>
+      )}
+    </>
   );
 }

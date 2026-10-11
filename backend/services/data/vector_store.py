@@ -54,9 +54,20 @@ class BaseVectorStore(ABC):
 class ChromaVectorStore(BaseVectorStore):
     """Vector store using local ChromaDB."""
 
-    def __init__(self, collection_name: str = "datalens_rag", persist_directory: str = "./chroma_db"):
+    def __init__(self, collection_name: str = "datalens_rag", persist_directory: str = None):
         if chromadb is None:
             raise RuntimeError("chromadb is not installed.")
+
+        if not persist_directory:
+            try:
+                from backend.config import settings
+                persist_directory = settings.chroma_persist_dir
+            except ImportError:
+                try:
+                    from config import settings
+                    persist_directory = settings.chroma_persist_dir
+                except ImportError:
+                    persist_directory = "./chroma_db"
 
         # Ensure directory exists
         os.makedirs(persist_directory, exist_ok=True)
@@ -137,3 +148,13 @@ class ChromaVectorStore(BaseVectorStore):
 
     def dataset_exists(self, dataset_id: str) -> bool:
         return self.count_vectors(dataset_id) > 0
+
+
+_global_vector_store = None
+
+def get_vector_store() -> BaseVectorStore:
+    """Get the global application-scoped vector store instance."""
+    global _global_vector_store
+    if _global_vector_store is None:
+        _global_vector_store = ChromaVectorStore()
+    return _global_vector_store

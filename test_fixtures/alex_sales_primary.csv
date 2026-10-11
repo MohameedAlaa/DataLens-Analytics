@@ -1,0 +1,5 @@
+country,product,sales,customers,date
+USA,Laptop,1000,10,2026-01-01
+USA,Phone,700,7,2026-01-02
+Egypt,Laptop,800,8,2026-01-03
+Egypt,Phone,400,5,2026-01-04

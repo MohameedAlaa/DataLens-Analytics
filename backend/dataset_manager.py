@@ -1,8 +1,10 @@
 import abc
+import json
 import logging
 import threading
 import uuid
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -12,10 +14,10 @@ logger = logging.getLogger(__name__)
 class BaseStorageEngine(abc.ABC):
     """Abstract base class for pluggable dataset storage engines.
     
-    Future implementations can inherit from this class to support:
-    - DuckDBStorageEngine (relational OLAP queries)
-    - SQLiteStorageEngine (disk-persisted SQL storage)
-    - RedisStorageEngine (distributed in-memory cache)
+    Implementations include:
+    - InMemoryStorageEngine (ephemeral in-memory dictionary)
+    - DiskStorageEngine (persistent Parquet + JSON filesystem storage)
+    - DuckDBStorageEngine / RedisStorageEngine (distributed external stores)
     """
 
     @abc.abstractmethod
@@ -56,69 +58,126 @@ class InMemoryStorageEngine(BaseStorageEngine):
         self._lock = threading.Lock()
         self._data: Dict[str, pd.DataFrame] = {}
         self._metadata: Dict[str, Dict[str, Any]] = {}
-        self._filename_to_id: Dict[str, str] = {}  # Index for legacy filename fallback lookups
 
     def store(self, dataset_id: str, df: pd.DataFrame, metadata: Dict[str, Any]) -> None:
         with self._lock:
             self._data[dataset_id] = df
             self._metadata[dataset_id] = metadata
-            filename = metadata.get("filename")
-            if filename:
-                self._filename_to_id[filename] = dataset_id
 
     def get(self, dataset_id: str) -> Optional[pd.DataFrame]:
         with self._lock:
-            if dataset_id in self._data:
-                return self._data[dataset_id]
-            # Fallback lookup by legacy filename for backwards compatibility
-            if dataset_id in self._filename_to_id:
-                target_id = self._filename_to_id[dataset_id]
-                logger.warning(
-                    "Legacy lookup using filename '%s'. Please migrate client to dataset_id '%s'",
-                    dataset_id, target_id
-                )
-                return self._data.get(target_id)
-            return None
+            return self._data.get(dataset_id)
 
     def get_metadata(self, dataset_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
-            if dataset_id in self._metadata:
-                return self._metadata[dataset_id]
-            if dataset_id in self._filename_to_id:
-                return self._metadata.get(self._filename_to_id[dataset_id])
-            return None
+            return self._metadata.get(dataset_id)
 
     def delete(self, dataset_id: str) -> bool:
         with self._lock:
             if dataset_id in self._data:
-                meta = self._metadata.pop(dataset_id, {})
-                filename = meta.get("filename")
-                if filename and self._filename_to_id.get(filename) == dataset_id:
-                    self._filename_to_id.pop(filename, None)
+                self._metadata.pop(dataset_id, None)
                 self._data.pop(dataset_id, None)
                 return True
             return False
 
     def exists(self, dataset_id: str) -> bool:
         with self._lock:
-            return dataset_id in self._data or dataset_id in self._filename_to_id
+            return dataset_id in self._data
 
     def list_ids(self) -> List[str]:
         with self._lock:
             return list(self._data.keys())
 
 
+class DiskStorageEngine(BaseStorageEngine):
+    """Persistent filesystem storage engine for DataFrames and metadata.
+
+    Persists datasets as Parquet files and JSON metadata to a configured directory.
+    Enables cross-process persistence and surviving process restarts.
+    """
+
+    def __init__(self, storage_dir: Union[str, Path] = "./dataset_storage") -> None:
+        self.storage_dir = Path(storage_dir).resolve()
+        try:
+            self.storage_dir.mkdir(parents=True, exist_ok=True)
+            # Probe write permissions to fail fast if persistent storage is misconfigured/read-only
+            probe_file = self.storage_dir / ".write_probe"
+            probe_file.touch()
+            probe_file.unlink()
+        except Exception as exc:
+            raise RuntimeError(
+                f"DiskStorageEngine failed to initialize writable directory at '{self.storage_dir}': {exc}"
+            ) from exc
+        self._lock = threading.Lock()
+
+    def _df_path(self, dataset_id: str) -> Path:
+        return self.storage_dir / f"{dataset_id}.parquet"
+
+    def _meta_path(self, dataset_id: str) -> Path:
+        return self.storage_dir / f"{dataset_id}.meta.json"
+
+    def store(self, dataset_id: str, df: pd.DataFrame, metadata: Dict[str, Any]) -> None:
+        with self._lock:
+            df.to_parquet(self._df_path(dataset_id), index=False)
+            with open(self._meta_path(dataset_id), "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+
+    def get(self, dataset_id: str) -> Optional[pd.DataFrame]:
+        with self._lock:
+            p = self._df_path(dataset_id)
+            if not p.is_file():
+                return None
+            try:
+                return pd.read_parquet(p)
+            except Exception as e:
+                logger.error("Failed to read dataset '%s' from disk: %s", dataset_id, e)
+                return None
+
+    def get_metadata(self, dataset_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            p = self._meta_path(dataset_id)
+            if not p.is_file():
+                return None
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error("Failed to read metadata for '%s' from disk: %s", dataset_id, e)
+                return None
+
+    def delete(self, dataset_id: str) -> bool:
+        with self._lock:
+            df_p = self._df_path(dataset_id)
+            meta_p = self._meta_path(dataset_id)
+            existed = False
+            if df_p.is_file():
+                df_p.unlink()
+                existed = True
+            if meta_p.is_file():
+                meta_p.unlink()
+                existed = True
+            return existed
+
+    def exists(self, dataset_id: str) -> bool:
+        with self._lock:
+            return self._df_path(dataset_id).is_file() and self._meta_path(dataset_id).is_file()
+
+    def list_ids(self) -> List[str]:
+        with self._lock:
+            return [p.stem for p in self.storage_dir.glob("*.parquet")]
+
+
 class DatasetManager:
     """Central Dataset Manager handling UUID assignment, internal storage, and retrieval.
     
-    Supports pluggable storage engines for future DuckDB, SQLite, and Redis integration.
+    Supports pluggable storage engines for in-memory, disk Parquet, DuckDB, and Redis.
     """
 
     def __init__(self, engine: Optional[BaseStorageEngine] = None) -> None:
         self._engine: BaseStorageEngine = engine or InMemoryStorageEngine()
 
     def set_engine(self, engine: BaseStorageEngine) -> None:
-        """Switch storage engine (e.g. DuckDBStorageEngine, SQLiteStorageEngine, RedisStorageEngine)."""
+        """Switch storage engine (e.g. DiskStorageEngine, RedisStorageEngine)."""
         logger.info("Switching DatasetManager storage engine to %s", engine.__class__.__name__)
         self._engine = engine
 
@@ -164,8 +223,9 @@ class DatasetManager:
         meta = self.get_metadata(dataset_id)
         if meta is not None:
             meta["indexing_status"] = status
-            # Updating dict in place works for InMemoryStorageEngine, 
-            # but ideally we should call a method on the engine. For now, this suffices.
+            df = self.get_dataset(dataset_id)
+            if df is not None:
+                self._engine.store(dataset_id, df, meta)
             logger.info("Dataset '%s' indexing status updated to %s", dataset_id, status)
 
     def update_rag_metadata(self, dataset_id: str, rag_metadata: Dict[str, Any]) -> None:
@@ -173,6 +233,9 @@ class DatasetManager:
         meta = self.get_metadata(dataset_id)
         if meta is not None:
             meta.update(rag_metadata)
+            df = self.get_dataset(dataset_id)
+            if df is not None:
+                self._engine.store(dataset_id, df, meta)
             logger.info("Dataset '%s' RAG metadata updated: %s", dataset_id, list(rag_metadata.keys()))
 
     def get_dataset(self, dataset_id_or_filename: str) -> Optional[pd.DataFrame]:
@@ -196,5 +259,40 @@ class DatasetManager:
         return self._engine.list_ids()
 
 
-# Global singleton instance of DatasetManager
-dataset_manager = DatasetManager()
+def create_default_dataset_manager() -> DatasetManager:
+    try:
+        from backend.config import settings
+    except ImportError:
+        try:
+            from config import settings
+        except ImportError:
+            settings = None
+
+    if settings and getattr(settings, "storage_engine", "memory") in ("disk", "filesystem"):
+        engine = DiskStorageEngine(storage_dir=settings.dataset_storage_dir)
+        logger.info("Initializing DatasetManager with DiskStorageEngine at '%s'", settings.dataset_storage_dir)
+    else:
+        if settings and getattr(settings, "is_production", False):
+            logger.warning(
+                "PRODUCTION WARNING: DatasetManager running with InMemoryStorageEngine (STORAGE_ENGINE='%s'). "
+                "Dataset state will NOT persist across process restarts or multi-instance deployments. "
+                "Configure STORAGE_ENGINE=disk and DATASET_STORAGE_DIR to a persistent volume for production.",
+                getattr(settings, "storage_engine", "memory")
+            )
+        engine = InMemoryStorageEngine()
+    return DatasetManager(engine=engine)
+
+
+# ---------------------------------------------------------------------------
+# Default singleton instance (used by serverless api/ and default app state)
+# ---------------------------------------------------------------------------
+dataset_manager = create_default_dataset_manager()
+
+import sys
+# Alias module in sys.modules to prevent duplicate instances when imported as both 'dataset_manager' and 'backend.dataset_manager'
+if __name__ in sys.modules:
+    sys.modules["backend.dataset_manager"] = sys.modules[__name__]
+    sys.modules["dataset_manager"] = sys.modules[__name__]
+
+
+

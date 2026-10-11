@@ -9,4 +9,10 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
-.DS_Store
+.DS_Store
+chroma_db/
+backend/chroma_db/
+*.sqlite3
+dataset_storage/
+backend/dataset_storage/
+

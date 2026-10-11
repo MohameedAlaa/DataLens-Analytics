@@ -14,7 +14,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from fastapi.testclient import TestClient
 
-from app import app, dataset_manager, limiter
+from app import app, limiter
 from api_helpers import _context_cache
 
 
@@ -23,6 +23,8 @@ def reset_state():
     """Reset in-memory dataset manager, rate limiter, and chat context cache before every test."""
     if limiter is not None:
         limiter.enabled = False
+
+    dataset_manager = app.state.dataset_manager
 
     # Clear datasets
     for item in list(dataset_manager.list_datasets()):
@@ -68,7 +70,7 @@ def make_csv():
     return _make_csv
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_ai_response(monkeypatch):
     """Mock `generate_chat_response_async` in app module to return a predictable response by default."""
     async def _mock_generate(*args, **kwargs):

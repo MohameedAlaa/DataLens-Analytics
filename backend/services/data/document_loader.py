@@ -54,17 +54,14 @@ class DatasetDocumentLoader(BaseDocumentLoader):
             "row_count": rows,
             "column_count": cols,
             "column_names": columns,
-            "sheet_name": kwargs.get("sheet_name", "Sheet1")
+            "sheet_name": kwargs.get("sheet_name", "Sheet1"),
+            "df": source
         }
-
-        # Convert to text preserving row boundaries.
-        csv_string = source.to_csv(index=False)
 
         content = (
             f"Dataset: '{filename}' (ID: {doc_id})\n"
             f"Dimensions: {rows} rows, {cols} columns\n"
-            f"Columns: {', '.join(columns)}\n\n"
-            f"Data:\n{csv_string}"
+            f"Columns: {', '.join(columns)}\n"
         )
 
         return [Document(doc_id=doc_id, content=content, metadata=metadata)]

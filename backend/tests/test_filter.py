@@ -30,8 +30,9 @@ def test_filter_by_legacy_filename(client, make_csv):
     )
     assert upload_res.status_code == 200
 
+    dataset_id = upload_res.json()["dataset_id"]
     filter_req = {
-        "filename": "legacy.csv",
+        "filename": dataset_id,
         "filters": {"val": {"max": 15}},
     }
     response = client.post("/filter", json=filter_req)

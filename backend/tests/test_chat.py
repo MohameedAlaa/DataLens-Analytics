@@ -32,8 +32,9 @@ def test_chat_legacy_filename(client, make_csv, mock_ai_response):
     )
     assert upload_res.status_code == 200
 
+    dataset_id = upload_res.json()["dataset_id"]
     chat_req = {
-        "filename": "sales.csv",
+        "filename": dataset_id,
         "question": "Summarize quantities.",
     }
     response = client.post("/chat", json=chat_req)
@@ -101,7 +102,7 @@ def test_chat_ai_rate_limit_error(client, make_csv, monkeypatch):
 
 
 def test_chat_ai_unavailable_error(client, make_csv, monkeypatch):
-    """Test that AIUnavailableError maps to HTTP 503 status code."""
+    """Test that AIUnavailableError maps to HTTP 503 status code when non-deterministic."""
     upload_res = client.post(
         "/upload",
         files={"file": ("data.csv", make_csv("a,b\n1,2"), "text/csv")},
@@ -120,3 +121,34 @@ def test_chat_ai_unavailable_error(client, make_csv, monkeypatch):
     response = client.post("/chat", json=chat_req)
     assert response.status_code == 503
     assert "unavailable" in str(response.json()).lower()
+
+
+def test_deterministic_analytics_fallback_on_llm_failure(client, make_csv, monkeypatch):
+    """Verify deterministic query succeeds with exact arithmetic fallback when LLM fails/times out."""
+    upload_res = client.post(
+        "/upload",
+        files={"file": ("sales_fallback.csv", make_csv("country,sales\nUSA,1000\nEgypt,1900"), "text/csv")},
+    )
+    assert upload_res.status_code == 200
+    dataset_id = upload_res.json()["dataset_id"]
+
+    # Simulate upstream Gemini timeout/failure in call_ai_async
+    async def _failing_ai(*args, **kwargs):
+        raise RuntimeError("Gemini API request timed out (simulated 504/timeout)")
+
+    monkeypatch.setattr("services.ai.rag.llm_service.call_ai_async", _failing_ai)
+    monkeypatch.setattr("api_helpers.call_ai_async", _failing_ai)
+
+    # Question with deterministic answer: total sales = 2900
+    chat_req = {
+        "dataset_id": dataset_id,
+        "question": "What is the total sales?",
+    }
+    response = client.post("/chat", json=chat_req)
+    assert response.status_code == 200, f"Expected 200 via fallback, got {response.status_code}: {response.text}"
+    data = response.json()
+    assert "analytics" in data
+    assert data["analytics"]["value"] == 2900
+    assert "2900" in data["answer"]
+    assert "deterministic" in data["answer"].lower()
+

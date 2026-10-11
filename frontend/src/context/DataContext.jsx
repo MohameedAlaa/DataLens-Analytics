@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
+import { extractErrorMessage } from '../utils/apiClient';
 
 // Create Context
 const DataContext = createContext(null);
@@ -14,11 +15,32 @@ export const DataProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const filterAbortControllerRef = useRef(null);
+  const filterRequestSeqRef = useRef(0);
+
+  // Clear dataset and reset all dependent states
+  const clearDataset = useCallback(() => {
+    if (filterAbortControllerRef.current) {
+      filterAbortControllerRef.current.abort();
+    }
+    setDatasetInfo(null);
+    setRawData([]);
+    setFilteredData([]);
+    setFilters({});
+    setError(null);
+    setLoading(false);
+  }, []);
+
   // Upload handler – called from useDataset hook
-  const uploadFile = async (file) => {
+  const uploadFile = useCallback(async (file) => {
     setLoading(true);
     setError(null);
     try {
+      // Abort any pending filter request from previous dataset
+      if (filterAbortControllerRef.current) {
+        filterAbortControllerRef.current.abort();
+      }
+
       const form = new FormData();
       form.append('file', file);
       // Let the browser set the Content-Type (and boundary) automatically.
@@ -35,79 +57,118 @@ export const DataProvider = ({ children }) => {
         date_columns: Array.isArray(info.date_columns) ? info.date_columns : [],
         preview: Array.isArray(info.preview) ? info.preview : [],
       };
+
+      // Reset filters and establish new dataset state atomically
+      setFilters({});
       setDatasetInfo(normalizedInfo);
-      // Store first 20000 rows for UI
       const previewRows = normalizedInfo.preview;
       setRawData(previewRows);
       setFilteredData(previewRows);
     } catch (e) {
-      setError(e.response?.data?.detail || e.message);
+      setError(extractErrorMessage(e, 'Failed to upload dataset'));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Apply filters – called from useFilters hook
-  const applyFilters = async (newFilters) => {
+  // Apply filters – called from useFilters hook with out-of-order protection
+  const applyFilters = useCallback(async (newFilters) => {
     if (!datasetInfo?.dataset_id) return;
+
+    // Abort previous filter request if still in flight
+    if (filterAbortControllerRef.current) {
+      filterAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    filterAbortControllerRef.current = abortController;
+    const requestSeq = ++filterRequestSeqRef.current;
+
     setLoading(true);
     setError(null);
     try {
-      const resp = await axios.post('/api/filter', {
-        dataset_id: datasetInfo.dataset_id,
-        filters: newFilters,
-      });
-      const rows = resp.data.filtered_data || [];
-      setFilters(newFilters);
-      setFilteredData(rows.slice(0, 20000)); // cap for UI
-    } catch (e) {
-      // Handle Pydantic validation errors
-      let errorMsg = e.message;
-      if (e.response?.data?.detail) {
-        const detail = e.response.data.detail;
-        if (Array.isArray(detail)) {
-          // Pydantic validation errors array
-          errorMsg = detail.map(err => `${err.msg} at ${err.loc?.join('.')}`).join('; ');
-        } else if (typeof detail === 'object') {
-          errorMsg = JSON.stringify(detail);
-        } else {
-          errorMsg = detail;
-        }
+      const resp = await axios.post(
+        '/api/filter',
+        {
+          dataset_id: datasetInfo.dataset_id,
+          filters: newFilters,
+        },
+        { signal: abortController.signal }
+      );
+
+      // Only update state if this is still the latest request
+      if (requestSeq === filterRequestSeqRef.current) {
+        const rows = resp.data.filtered_data || [];
+        setFilters(newFilters);
+        setFilteredData(rows.slice(0, 20000)); // cap for UI
       }
-      setError(errorMsg);
+    } catch (e) {
+      if (axios.isCancel(e) || e.name === 'CanceledError' || e.name === 'AbortError') {
+        // Request was cancelled intentionally, do not set error
+        return;
+      }
+      if (requestSeq === filterRequestSeqRef.current) {
+        setError(extractErrorMessage(e, 'Failed to apply filters'));
+      }
     } finally {
-      setLoading(false);
+      if (requestSeq === filterRequestSeqRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [datasetInfo?.dataset_id]);
 
   // Reset all filters
-  const resetFilters = async () => {
+  const resetFilters = useCallback(async () => {
     if (!datasetInfo?.dataset_id) return;
+    setFilters({});
+    if (rawData.length) {
+      setFilteredData(rawData);
+    }
     await applyFilters({});
-  };
+  }, [datasetInfo?.dataset_id, rawData, applyFilters]);
 
   // Effect to keep filteredData in sync when raw data changes and no filters
   useEffect(() => {
     if (Object.keys(filters).length === 0 && rawData.length) {
       setFilteredData(rawData);
     }
-  }, [rawData]);
+  }, [rawData, filters]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (filterAbortControllerRef.current) {
+        filterAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  const contextValue = useMemo(() => ({
+    datasetInfo,
+    rawData,
+    filteredData,
+    filters,
+    loading,
+    error,
+    uploadFile,
+    applyFilters,
+    resetFilters,
+    setDatasetInfo,
+    clearDataset,
+  }), [
+    datasetInfo,
+    rawData,
+    filteredData,
+    filters,
+    loading,
+    error,
+    uploadFile,
+    applyFilters,
+    resetFilters,
+    clearDataset,
+  ]);
 
   return (
-    <DataContext.Provider
-      value={{
-        datasetInfo,
-        rawData,
-        filteredData,
-        filters,
-        loading,
-        error,
-        uploadFile,
-        applyFilters,
-        resetFilters,
-        setDatasetInfo,
-      }}
-    >
+    <DataContext.Provider value={contextValue}>
       {children}
     </DataContext.Provider>
   );

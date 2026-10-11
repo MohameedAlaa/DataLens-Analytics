@@ -76,12 +76,18 @@ function boxStats(rows, col) {
 /** Build correlation heatmap cells */
 function buildHeatmapCells(rows, numericCols) {
   if (numericCols.length < 2) return [];
+  // Precompute numeric arrays once per column instead of N*N times
+  const colData = {};
+  for (const c of numericCols) {
+    colData[c] = rows.map(r => Number(r[c])).filter(v => Number.isFinite(v));
+  }
+
   const cells = [];
   for (let i = 0; i < numericCols.length; i++) {
     for (let j = 0; j < numericCols.length; j++) {
       const a = numericCols[i], b = numericCols[j];
-      const pairsA = rows.map(r => Number(r[a])).filter(v => Number.isFinite(v));
-      const pairsB = rows.map(r => Number(r[b])).filter(v => Number.isFinite(v));
+      const pairsA = colData[a];
+      const pairsB = colData[b];
       const n = Math.min(pairsA.length, pairsB.length);
       let corr = i === j ? 1 : 0;
       if (n > 2 && i !== j) {

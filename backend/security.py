@@ -199,20 +199,63 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-XSS-Protection"] = "0"   # Modern browsers ignore this; CSP is preferred
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         return response
 
 
 # ---------------------------------------------------------------------------
-# Rate limiter (slowapi)
+# Client IP resolution & Rate limiter (slowapi)
 # ---------------------------------------------------------------------------
+
+def get_client_ip(request: Request) -> str:
+    """Extract client IP address defensively.
+
+    If request is from a direct client or untrusted peer, return request.client.host.
+    Do NOT trust X-Forwarded-For or X-Real-IP headers unless request.client.host is
+    explicitly in settings.trusted_proxies. This prevents IP spoofing and rate-limit bypass.
+    """
+    direct_ip = getattr(request.client, "host", "127.0.0.1") if request.client else "127.0.0.1"
+
+    try:
+        from config import settings
+        trusted_proxies = getattr(settings, "trusted_proxies", [])
+    except Exception:
+        trusted_proxies = []
+
+    if not trusted_proxies or direct_ip not in trusted_proxies:
+        return direct_ip
+
+    # Peer is a verified trusted proxy: check X-Real-IP first
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip and real_ip.strip():
+        return real_ip.strip()
+
+    # If X-Forwarded-For is present, traverse from right to left to find the first untrusted client IP
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        for ip in reversed(ips):
+            if ip not in trusted_proxies:
+                return ip
+        if ips:
+            return ips[0]
+
+    return direct_ip
+
 
 def create_rate_limiter():
     """Create and return a slowapi Limiter, or None if slowapi is not installed."""
     try:
         from slowapi import Limiter
-        from slowapi.util import get_remote_address
-        limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+        try:
+            from config import settings
+            default_limit = settings.rate_limit_default
+        except Exception:
+            default_limit = "60/minute"
+        limiter = Limiter(key_func=get_client_ip, default_limits=[default_limit])
         logger.info("Rate limiter enabled (slowapi)")
         return limiter
     except ImportError:

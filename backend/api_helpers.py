@@ -6,6 +6,8 @@ import math
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
+from fastapi import HTTPException
+
 from services.ai.rag.citation_builder import CitationBuilder
 from services.ai.rag.prompt_builder import PromptBuilder
 from services.ai.rag.query_router import QueryRouter
@@ -14,6 +16,28 @@ from services.ai.rag.llm_service import RagLLMService
 from services.data.vector_store import ChromaVectorStore
 from services.ai.embeddings.embedding_service import SentenceTransformerEmbeddingService
 
+
+def check_dataset_ready(meta: Optional[Dict[str, Any]]) -> None:
+    """Enforce dataset lifecycle state before allowing read access."""
+    if not meta:
+        raise HTTPException(status_code=404, detail="Dataset metadata not found.")
+    status = meta.get("indexing_status", "PENDING")
+    if status in ("PENDING", "PROCESSING"):
+        raise HTTPException(
+            status_code=409,
+            detail="Dataset ingestion is still in progress. Please try again later."
+        )
+    if status == "FAILED":
+        raise HTTPException(
+            status_code=400,
+            detail="Dataset ingestion failed. It cannot be queried."
+        )
+    if status != "READY":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset is in an invalid state: {status}."
+        )
+
 import numpy as np
 import pandas as pd
 try:
@@ -21,17 +45,19 @@ try:
 except ImportError:
     from .AI import call_ai, call_ai_async
 
-from services import InsightEngine
-
-logger = logging.getLogger(__name__)
-
 # Initialize single orchestrator engine for backend operations
-insight_engine = InsightEngine()
+logger = logging.getLogger(__name__)
+# (Removed legacy InsightEngine to prevent duplicate RAG paths and mock database queries)
+
+from services.analytics import get_analytics_engine
 
 # RAG orchestration helpers
 _query_router = QueryRouter()
 _prompt_builder = PromptBuilder()
 _citation_builder = CitationBuilder()
+
+def build_analytics_engine():
+    return get_analytics_engine()
 
 _MAX_RAG_TOP_K = 3
 
@@ -400,7 +426,7 @@ def build_dataset_context(dataset_id: str, df: pd.DataFrame, filename: str) -> s
         A multi-line string describing the dataset schema, column statistics,
         and a representative row sample.
     """
-    if dataset_id in _context_cache:
+    if dataset_id and dataset_id in _context_cache:
         _context_cache.move_to_end(dataset_id)   # refresh LRU position
         return _context_cache[dataset_id]
 
@@ -416,9 +442,10 @@ def build_dataset_context(dataset_id: str, df: pd.DataFrame, filename: str) -> s
         f"{json.dumps(sample, default=str)}"
     )
 
-    _context_cache[dataset_id] = context
-    if len(_context_cache) > _CONTEXT_CACHE_MAX:
-        _context_cache.popitem(last=False)   # evict oldest entry
+    if dataset_id:
+        _context_cache[dataset_id] = context
+        if len(_context_cache) > _CONTEXT_CACHE_MAX:
+            _context_cache.popitem(last=False)   # evict oldest entry
 
     logger.debug(
         "Built dataset context for dataset_id='%s' (%.1f KB, cached)",
@@ -462,14 +489,16 @@ def build_query_router() -> QueryRouter:
 
 
 def build_retriever() -> Retriever:
+    from services.data.vector_store import get_vector_store
+    from services.ai.embeddings.embedding_service import get_embedding_service
     try:
         return Retriever(
-            vector_store=ChromaVectorStore(),
-            embedding_service=SentenceTransformerEmbeddingService(),
+            vector_store=get_vector_store(),
+            embedding_service=get_embedding_service(),
         )
     except Exception as exc:
         logger.warning("Unable to initialize retriever: %s", exc)
-        return Retriever(vector_store=ChromaVectorStore(), embedding_service=SentenceTransformerEmbeddingService())
+        return Retriever(vector_store=get_vector_store(), embedding_service=get_embedding_service())
 
 
 def build_prompt_builder() -> PromptBuilder:
@@ -488,6 +517,48 @@ def build_llm_service() -> RagLLMService:
 # Filter helper (unrelated to chat — kept in place)
 # ---------------------------------------------------------------------------
 
+def filter_dataframe(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
+    """Apply dictionary filtering criteria to a DataFrame and return filtered DataFrame."""
+    if df.empty or not filters:
+        return df
+
+    res = df.copy()
+    for col, condition in filters.items():
+        if col not in res.columns:
+            continue
+        if isinstance(condition, dict):
+            if "range" in condition:
+                lo, hi = condition["range"]
+                if pd.api.types.is_object_dtype(res[col]):
+                    res[col] = pd.to_numeric(res[col], errors="coerce")
+                res = res[(res[col] >= lo) & (res[col] <= hi)]
+            else:
+                if pd.api.types.is_object_dtype(res[col]):
+                    res[col] = pd.to_numeric(res[col], errors="coerce")
+                if "min" in condition:
+                    res = res[res[col] >= condition["min"]]
+                if ">=" in condition:
+                    res = res[res[col] >= condition[">="]]
+                if ">" in condition:
+                    res = res[res[col] > condition[">"]]
+                if "max" in condition:
+                    res = res[res[col] <= condition["max"]]
+                if "<=" in condition:
+                    res = res[res[col] <= condition["<="]]
+                if "<" in condition:
+                    res = res[res[col] < condition["<"]]
+                if "==" in condition:
+                    res = res[res[col] == condition["=="]]
+                if "!=" in condition:
+                    res = res[res[col] != condition["!="]]
+        else:
+            if isinstance(condition, list):
+                res = res[res[col].isin(condition)]
+            else:
+                res = res[res[col] == condition]
+    return res
+
+
 def apply_filters(
     data_or_df: Union[pd.DataFrame, List[Dict[str, Any]]],
     filters: Dict[str, Any]
@@ -501,29 +572,8 @@ def apply_filters(
     if df.empty:
         return {"row_count": 0, "filtered_data": []}
 
-    for col, condition in filters.items():
-        if col not in df.columns:
-            continue
-        if isinstance(condition, dict):
-            if "range" in condition:
-                lo, hi = condition["range"]
-                if pd.api.types.is_object_dtype(df[col]):
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                df = df[(df[col] >= lo) & (df[col] <= hi)]
-            else:
-                if pd.api.types.is_object_dtype(df[col]):
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                if "min" in condition:
-                    df = df[df[col] >= condition["min"]]
-                if "max" in condition:
-                    df = df[df[col] <= condition["max"]]
-        else:
-            if isinstance(condition, list):
-                df = df[df[col].isin(condition)]
-            else:
-                df = df[df[col] == condition]
-
-    filtered = df.to_dict(orient="records")
+    filtered_df = filter_dataframe(df, filters)
+    filtered = filtered_df.to_dict(orient="records")
     return {"row_count": len(filtered), "filtered_data": filtered}
 
 
@@ -537,7 +587,8 @@ async def generate_chat_response_async(
     data_or_df: Union[pd.DataFrame, List[Dict[str, Any]]],
     filename: Optional[str] = None,
     dataset_id: Optional[str] = None,
-) -> Dict[str, str]:
+    filters: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Asynchronously generate a chat response using the AI backend.
 
     When ``dataset_id`` is supplied the dataset context (column statistics +
@@ -586,19 +637,37 @@ async def generate_chat_response_async(
 
     session_key = dataset_id or str(uuid.uuid4())
     try:
-        from dataset_manager import dataset_manager
-        meta = dataset_manager.get_metadata(dataset_id) if dataset_id else None
-
         router = build_query_router()
         routing = router.route(question=question, df=df, history=history, filename=filename)
 
         use_rag_flag = bool(routing.get("needs_retrieval"))
-        if meta and meta.get("indexing_status") == "READY" and use_rag_flag:
-            logger.info("Dataset '%s' is READY and routing requested retrieval; using RAG orchestration.", dataset_id)
-        elif meta and meta.get("indexing_status") != "READY":
-            logger.info("Dataset '%s' is not READY (status: %s). Falling back to basic chat.", dataset_id, meta.get("indexing_status"))
+        # Apply filters if provided
+        filtered_df = filter_dataframe(df, filters) if filters else df
+        if filters:
+            logger.info("Applied filters: %s. Rows remaining: %d", filters, len(filtered_df))
+
+        use_stats_flag = bool(routing.get("needs_stats"))
+        
+        analytics_result = None
+        if use_stats_flag:
+            analytics_engine = build_analytics_engine()
+            res = analytics_engine.analyze(question, filtered_df)
+            if res and "error" not in res:
+                analytics_result = res
+                logger.info("Deterministic analytics matched: %s", res)
+                # If analytics fully answers it, optionally disable RAG unless router asked for both
+                if routing.get("reason") == "analytics":
+                    use_rag_flag = False
+
+        if use_rag_flag and dataset_id:
+            logger.info("Routing requested retrieval; using RAG orchestration for dataset '%s'.", dataset_id)
+        elif use_rag_flag and not dataset_id:
+            logger.info("Routing requested retrieval but no dataset_id provided. Falling back to basic chat.")
             use_rag_flag = False
 
+        retrieved_chunks = []
+        citations = []
+        
         if use_rag_flag:
             try:
                 retriever = build_retriever()
@@ -607,34 +676,42 @@ async def generate_chat_response_async(
                     dataset_id=dataset_id or session_key,
                     top_k=routing.get("retrieval_top_k", _MAX_RAG_TOP_K),
                 )
-                prompt_builder = build_prompt_builder()
                 citation_builder = build_citation_builder()
-                llm_service = build_llm_service()
                 citations = citation_builder.build(retrieved_chunks)
-                prompt = prompt_builder.build(
-                    question=question,
-                    system_prompt=system_prompt,
-                    history=history,
-                    retrieved_chunks=retrieved_chunks,
-                    citations=citations,
-                    dataset_context=build_dataset_context(dataset_id, df, filename or "dataset") if dataset_id else None,
-                )
-                answer = await llm_service.generate(prompt)
-                if not answer:
-                    answer = generate_local_answer(question, df)
-                return {"answer": answer, "citations": citations}
             except Exception as exc:
-                logger.warning("RAG orchestration failed for dataset '%s': %s", dataset_id or session_key, exc)
+                logger.warning("RAG retrieval failed for dataset '%s': %s", dataset_id or session_key, exc)
+                # Fail gracefully by providing no chunks, falling back to basic prompt
 
-        # Route through newly structured modular InsightEngine facade
-        answer = await insight_engine.generate_chat_response(
+        prompt_builder = build_prompt_builder()
+        llm_service = build_llm_service()
+        
+        # Inject deterministic analytics results if any
+        if analytics_result:
+            import json
+            system_prompt += f"\n\nCRITICAL DETERMINISTIC ANALYTICS RESULT:\n{json.dumps(analytics_result)}\n\nThe user's question MUST be answered using this exact deterministic calculation. DO NOT recalculate this value yourself. Just explain this result clearly to the user."
+
+        prompt = prompt_builder.build(
             question=question,
-            history=history,
             system_prompt=system_prompt,
-            session_id=session_key,
-            use_rag=use_rag_flag,
+            history=history,
+            retrieved_chunks=retrieved_chunks,
+            citations=citations,
+            dataset_context=build_dataset_context(
+                None if filters else dataset_id,
+                filtered_df if filters else df,
+                filename or "dataset"
+            ) if dataset_id else None,
         )
-        return {"answer": answer}
+        
+        answer = await llm_service.generate(prompt)
+        if not answer:
+            answer = generate_local_answer(question, df)
+            
+        resp = {"answer": answer, "citations": citations}
+        if analytics_result:
+            resp["analytics"] = analytics_result
+            
+        return resp
 
     except RuntimeError as exc:
         msg = str(exc)
@@ -642,6 +719,13 @@ async def generate_chat_response_async(
             "AI call failed for dataset_id='%s': %s",
             dataset_id or "(no id)", msg,
         )
+        if analytics_result:
+            op = analytics_result.get("operation", "calculation")
+            col = analytics_result.get("column", "")
+            val = analytics_result.get("value", "")
+            ans = f"Based on deterministic analysis, the {op} of {col} is {val}."
+            return {"answer": ans, "citations": citations, "analytics": analytics_result}
+
         # Map to typed errors so the endpoint can return the correct HTTP code
         if "429" in msg or "rate" in msg.lower():
             raise AIRateLimitError(msg) from exc
@@ -660,6 +744,13 @@ async def generate_chat_response_async(
             "Unexpected AI error for dataset_id='%s': %s",
             dataset_id or "(no id)", exc,
         )
+        if analytics_result:
+            op = analytics_result.get("operation", "calculation")
+            col = analytics_result.get("column", "")
+            val = analytics_result.get("value", "")
+            ans = f"Based on deterministic analysis, the {op} of {col} is {val}."
+            return {"answer": ans, "citations": citations, "analytics": analytics_result}
+
         fallback = generate_local_answer(question, df)
         answer = (
             "The AI assistant encountered an unexpected error. "

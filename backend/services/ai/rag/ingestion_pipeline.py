@@ -9,7 +9,7 @@ import asyncio
 from typing import Any, Dict
 import pandas as pd
 
-from dataset_manager import dataset_manager
+
 from services.data.document_loader import DatasetDocumentLoader
 from services.ai.rag.chunker import TokenRowChunker
 from services.ai.embeddings.embedding_service import SentenceTransformerEmbeddingService
@@ -31,14 +31,17 @@ class IngestionPipeline:
         # but for simplicity in V1 we initialize on first use or in background.
 
     def _ensure_services_initialized(self):
+        from services.ai.embeddings.embedding_service import get_embedding_service
+        from services.data.vector_store import get_vector_store
+        
         if self.embedding_service is None:
-            logger.info("Initializing Embedding Service in background...")
-            self.embedding_service = SentenceTransformerEmbeddingService()
+            logger.info("Retrieving global Embedding Service...")
+            self.embedding_service = get_embedding_service()
         if self.vector_store is None:
-            logger.info("Initializing Vector Store in background...")
-            self.vector_store = ChromaVectorStore()
+            logger.info("Retrieving global Vector Store...")
+            self.vector_store = get_vector_store()
 
-    def run_ingestion(self, dataset_id: str, df: pd.DataFrame, filename: str) -> None:
+    def run_ingestion(self, dataset_id: str, df: pd.DataFrame, filename: str, dataset_manager) -> None:
         """Run the ingestion pipeline synchronously (called via BackgroundTasks)."""
         try:
             logger.info("Dataset Ingestion Started for '%s'", dataset_id)
@@ -69,8 +72,21 @@ class IngestionPipeline:
 
             # 4. Vector Store Insert
             logger.info("Vector Store Insert Started for '%s'", dataset_id)
+            
+            # Clean up any existing vectors for this dataset_id to prevent duplicate orphans
+            self.vector_store.delete_dataset(dataset_id)
+            
             self.vector_store.add_chunks(chunks, embeddings)
             logger.info("Vector Store Inserted for '%s'", dataset_id)
+
+            # 5. Index Verification
+            vector_count = self.vector_store.count_vectors(dataset_id)
+            if vector_count == 0:
+                raise RuntimeError("Index verification failed: 0 vectors found in Chroma after insertion.")
+            elif vector_count != len(chunks):
+                logger.warning("Index verification mismatch: inserted %d chunks but found %d vectors in Chroma.", len(chunks), vector_count)
+            else:
+                logger.info("Index verified: %d vectors successfully stored.", vector_count)
 
             # Update extended RAG metadata
             import datetime
@@ -78,7 +94,7 @@ class IngestionPipeline:
                 "embedding_model": "all-MiniLM-L6-v2",
                 "embedding_dimension": 384,
                 "chunk_count": len(chunks),
-                "vector_count": len(chunks),
+                "vector_count": vector_count,
                 "indexed_at": datetime.datetime.utcnow().isoformat() + "Z",
                 "index_version": "1.0"
             }

@@ -1,18 +1,60 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import Navbar from './components/Navigation/Navbar';
 import Sidebar from './components/Navigation/Sidebar';
-import AIInsightsSection from './components/Insights/AIInsightsSection';
-import Dashboard from './components/Dashboard/Dashboard';
-import Chatbot from './components/Chatbot/Chatbot';
+import ErrorBoundary from './components/ErrorBoundary';
+
+const AIInsightsSection = lazy(() => import('./components/Insights/AIInsightsSection'));
+const Dashboard = lazy(() => import('./components/Dashboard/Dashboard'));
+const Chatbot = lazy(() => import('./components/Chatbot/Chatbot'));
+
+function SectionLoadingFallback({ title, height = 'h-36' }) {
+  return (
+    <div
+      className={`p-5 rounded-2xl border border-surface-border bg-surface-card/50
+                 flex items-center justify-center ${height} animate-pulse`}
+      aria-busy="true"
+      aria-label={`Loading ${title}`}
+    >
+      <span className="body-xs text-content-muted">{title ? `Loading ${title}...` : 'Loading...'}</span>
+    </div>
+  );
+}
+
+function CopilotLoadingFallback() {
+  return (
+    <aside
+      className="w-80 lg:w-96 border-l border-surface-border bg-surface-card/40
+                 items-center justify-center p-6 animate-pulse hidden lg:flex"
+      aria-busy="true"
+      aria-label="Loading AI Copilot"
+    >
+      <span className="body-xs text-content-muted">Loading AI Copilot...</span>
+    </aside>
+  );
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [externalPrompt, setExternalPrompt] = useState(null);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileCopilotOpen, setIsMobileCopilotOpen] = useState(false);
   const isClickNavigating = useRef(false);
+  const promptTimerRef = useRef(null);
 
   const handlePromptSelect = useCallback((promptText) => {
     setExternalPrompt(promptText);
-    setTimeout(() => setExternalPrompt(null), 150);
+    // Auto-open Copilot on mobile if prompt selected from AI Insights
+    if (window.innerWidth < 1024) {
+      setIsMobileCopilotOpen(true);
+    }
+    if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
+    promptTimerRef.current = setTimeout(() => setExternalPrompt(null), 150);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
+    };
   }, []);
 
   // Update active tab based on scroll position
@@ -20,7 +62,6 @@ export default function App() {
     const main = document.querySelector('main');
     if (!main) return;
     
-    let timeout;
     const handleScroll = () => {
       if (isClickNavigating.current) return;
       
@@ -58,8 +99,12 @@ export default function App() {
   const handleNavClick = useCallback((id) => {
     setActiveTab(id);
     if (id === 'copilot') {
-      const input = document.querySelector('aside form input');
-      if (input) input.focus();
+      if (window.innerWidth < 1024) {
+        setIsMobileCopilotOpen(true);
+      } else {
+        const input = document.querySelector('aside form input');
+        if (input) input.focus();
+      }
       return;
     }
     
@@ -77,12 +122,22 @@ export default function App() {
   return (
     <div className="min-h-screen bg-surface-bg text-content-primary flex flex-col font-sans">
       {/* Top Application Navbar */}
-      <Navbar activeTab={activeTab} setActiveTab={handleNavClick} />
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={handleNavClick}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
+        onToggleMobileCopilot={() => setIsMobileCopilotOpen(prev => !prev)}
+      />
 
       {/* 3-Column App Shell */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left Sidebar */}
-        <Sidebar activeTab={activeTab} setActiveTab={handleNavClick} />
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+        {/* Left Sidebar (Desktop + Mobile Drawer) */}
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={handleNavClick}
+          isOpenMobile={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        />
 
         {/* Center Main Canvas */}
         <main
@@ -91,13 +146,29 @@ export default function App() {
         >
           <div id="overview" className="h-0 w-full" />
           <div id="ai-insights">
-            <AIInsightsSection onPromptSelect={handlePromptSelect} />
+            <ErrorBoundary title="AI Insights Section">
+              <Suspense fallback={<SectionLoadingFallback title="AI Insights" height="h-28" />}>
+                <AIInsightsSection onPromptSelect={handlePromptSelect} />
+              </Suspense>
+            </ErrorBoundary>
           </div>
-          <Dashboard />
+          <ErrorBoundary title="Analytics Dashboard">
+            <Suspense fallback={<SectionLoadingFallback title="Dashboard" height="h-64" />}>
+              <Dashboard />
+            </Suspense>
+          </ErrorBoundary>
         </main>
 
-        {/* Right AI Copilot Panel */}
-        <Chatbot externalPrompt={externalPrompt} />
+        {/* Right AI Copilot Panel (Desktop + Mobile Drawer) */}
+        <ErrorBoundary title="AI Copilot">
+          <Suspense fallback={<CopilotLoadingFallback />}>
+            <Chatbot
+              externalPrompt={externalPrompt}
+              isOpenMobile={isMobileCopilotOpen}
+              onCloseMobile={() => setIsMobileCopilotOpen(false)}
+            />
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </div>
   );

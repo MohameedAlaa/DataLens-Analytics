@@ -45,45 +45,53 @@ class TokenRowChunker(BaseChunker):
     def chunk(self, documents: List[Document]) -> List[Chunk]:
         chunks: List[Chunk] = []
 
+        import csv
+        import io
+        import hashlib
+
+        def format_row_to_csv(row_tuple):
+            si = io.StringIO()
+            cw = csv.writer(si)
+            cw.writerow(row_tuple)
+            return si.getvalue()
+
         for doc in documents:
-            lines = doc.content.splitlines()
-            if not lines:
+            dataset_id = doc.metadata.get("dataset_id", doc.doc_id)
+            column_names = doc.metadata.get("column_names", [])
+            sheet_name = doc.metadata.get("sheet_name", "Sheet1")
+            filename = doc.metadata.get("filename", "dataset")
+            df = doc.metadata.get("df")
+
+            if df is None or df.empty:
                 continue
 
-            # Identify the header portion and the data portion
-            try:
-                data_start_idx = lines.index("Data:") + 1
-            except ValueError:
-                data_start_idx = 0
-
-            header = "\n".join(lines[:data_start_idx])
+            header = doc.content + "\nData:\n"
+            csv_header = format_row_to_csv(df.columns.tolist())
             header_tokens = self._count_tokens(header)
 
-            data_lines = lines[data_start_idx:]
-            if not data_lines:
-                continue
-            
-            # The first data line is the CSV header (columns)
-            csv_header = data_lines[0]
-            data_rows = data_lines[1:]
-
-            current_chunk_lines = []
-            current_tokens = header_tokens + self._count_tokens(csv_header + "\n")
+            current_chunk_rows = []
+            current_tokens = header_tokens + self._count_tokens(csv_header)
             
             chunk_idx = 0
             row_start = 0
 
-            dataset_id = doc.metadata.get("dataset_id", doc.doc_id)
-            column_names = doc.metadata.get("column_names", [])
-            sheet_name = doc.metadata.get("sheet_name", "Sheet1")
+            for i, row in enumerate(df.itertuples(index=False)):
+                row_csv = format_row_to_csv(row)
+                row_tokens = self._count_tokens(row_csv)
 
-            for i, row in enumerate(data_rows):
-                row_tokens = self._count_tokens(row + "\n")
+                # Protect against DOS/OOM: Skip rows that individually exceed the max_tokens limit
+                if row_tokens > self.max_tokens:
+                    logger.warning("Skipping oversized row %d in dataset '%s' (%d tokens)", i, dataset_id, row_tokens)
+                    continue
 
                 # If adding this row pushes us over max_tokens, and we have enough to form a valid chunk
-                if current_tokens + row_tokens > self.max_tokens and current_chunk_lines:
-                    chunk_text = f"{header}\n{csv_header}\n" + "\n".join(current_chunk_lines)
-                    chunk_id = f"{dataset_id}_chunk_{chunk_idx}"
+                if current_tokens + row_tokens > self.max_tokens and current_chunk_rows:
+                    chunk_text = f"{header}{csv_header}" + "".join(current_chunk_rows)
+                    
+                    row_end = row_start + len(current_chunk_rows) - 1
+                    chunk_id_str = f"{dataset_id}_{row_start}_{row_end}"
+                    chunk_hash = hashlib.sha256(chunk_id_str.encode()).hexdigest()[:12]
+                    chunk_id = f"{dataset_id}_chunk_{chunk_hash}"
                     
                     chunks.append(Chunk(
                         chunk_id=chunk_id,
@@ -91,9 +99,10 @@ class TokenRowChunker(BaseChunker):
                         text=chunk_text,
                         metadata={
                             "dataset_id": dataset_id,
+                            "filename": filename,
                             "chunk_id": chunk_id,
                             "row_start": row_start,
-                            "row_end": row_start + len(current_chunk_lines) - 1,
+                            "row_end": row_end,
                             "column_names": column_names,
                             "chunk_type": "tabular",
                             "sheet_name": sheet_name
@@ -102,26 +111,32 @@ class TokenRowChunker(BaseChunker):
                     
                     # Reset for next chunk
                     chunk_idx += 1
-                    current_chunk_lines = []
-                    current_tokens = header_tokens + self._count_tokens(csv_header + "\n")
+                    current_chunk_rows = []
+                    current_tokens = header_tokens + self._count_tokens(csv_header)
                     row_start = i
 
-                current_chunk_lines.append(row)
+                current_chunk_rows.append(row_csv)
                 current_tokens += row_tokens
 
             # Flush remaining lines
-            if current_chunk_lines:
-                chunk_text = f"{header}\n{csv_header}\n" + "\n".join(current_chunk_lines)
-                chunk_id = f"{dataset_id}_chunk_{chunk_idx}"
+            if current_chunk_rows:
+                chunk_text = f"{header}{csv_header}" + "".join(current_chunk_rows)
+                
+                row_end = row_start + len(current_chunk_rows) - 1
+                chunk_id_str = f"{dataset_id}_{row_start}_{row_end}"
+                chunk_hash = hashlib.sha256(chunk_id_str.encode()).hexdigest()[:12]
+                chunk_id = f"{dataset_id}_chunk_{chunk_hash}"
+
                 chunks.append(Chunk(
                     chunk_id=chunk_id,
                     doc_id=doc.doc_id,
                     text=chunk_text,
                     metadata={
                         "dataset_id": dataset_id,
+                        "filename": filename,
                         "chunk_id": chunk_id,
                         "row_start": row_start,
-                        "row_end": row_start + len(current_chunk_lines) - 1,
+                        "row_end": row_end,
                         "column_names": column_names,
                         "chunk_type": "tabular",
                         "sheet_name": sheet_name

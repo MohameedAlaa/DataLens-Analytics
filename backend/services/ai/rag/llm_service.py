@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from AI import call_ai_async
+try:
+    from backend.AI import call_ai_async
+except ImportError:
+    from AI import call_ai_async
 
 logger = logging.getLogger(__name__)
 

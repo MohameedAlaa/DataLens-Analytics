@@ -13,7 +13,10 @@ import logging
 import sys
 from typing import Optional
 
-from config import settings
+try:
+    from backend.config import settings
+except ImportError:
+    from config import settings
 
 
 # ---------------------------------------------------------------------------

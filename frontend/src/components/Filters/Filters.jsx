@@ -42,28 +42,50 @@ export default function Filters() {
 
   useEffect(() => { topValuesCache.current = {}; }, [rawData, filteredData]);
 
-  // ── Initialise localFilters when dataset changes ─────────────────────────
-  useEffect(() => {
-    if (!datasetInfo) return;
+  // ── Initialise localFilters helper ──────────────────────────────────────
+  const getInitialFilters = useCallback(() => {
+    if (!datasetInfo) return {};
     const init = {};
-    const open = {};
     (Array.isArray(datasetInfo?.numeric_columns) ? datasetInfo.numeric_columns : []).forEach((col) => {
       const b = getNumericBounds(col);
       if (b) init[col] = { range: [String(b[0]), String(b[1])] };
-      open[col] = false;
     });
     (Array.isArray(datasetInfo?.categorical_columns) ? datasetInfo.categorical_columns : []).forEach((col) => {
       init[col] = [];
-      open[col] = false;
     });
     (Array.isArray(datasetInfo?.date_columns) ? datasetInfo.date_columns : []).forEach((col) => {
       init[col] = { range: ['', ''] };
+    });
+    return init;
+  }, [datasetInfo, getNumericBounds]);
+
+  // ── Initialise localFilters when dataset changes ─────────────────────────
+  useEffect(() => {
+    if (!datasetInfo) return;
+    const init = getInitialFilters();
+    const open = {};
+    Object.keys(init).forEach((col) => {
       open[col] = false;
     });
     setLocalFilters(init);
     setOpenSections(open);
     initialised.current = false;
-  }, [datasetInfo, getNumericBounds]);
+  }, [datasetInfo, getInitialFilters]);
+
+  // Handle explicit reset of filters
+  const handleResetFilters = useCallback(async () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    initialised.current = false;
+    setLocalFilters(getInitialFilters());
+    await resetFilters();
+  }, [getInitialFilters, resetFilters]);
+
+  // Sync localFilters if external filters became empty (e.g. dataset switch)
+  useEffect(() => {
+    if (datasetInfo && Object.keys(filters || {}).length === 0 && initialised.current) {
+      setLocalFilters(getInitialFilters());
+    }
+  }, [filters, datasetInfo, getInitialFilters]);
 
   // ── Build backend payload ─────────────────────────────────────────────────
   const buildPayload = useCallback(() => {
@@ -266,8 +288,9 @@ export default function Filters() {
       {/* ── Footer: Reset + status ───────────────────────────────────────── */}
       <div className="pt-2 space-y-1.5">
         <button
-          onClick={resetFilters}
+          onClick={handleResetFilters}
           disabled={loading}
+          aria-label="Reset all filters"
           className="w-full flex items-center justify-center gap-1.5
                      px-3 py-1.5 rounded-lg body-xs font-semibold
                      border border-surface-border text-content-secondary

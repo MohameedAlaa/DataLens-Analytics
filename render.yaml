@@ -1,0 +1,62 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Backend Web Service (Persistent FastAPI + Uvicorn)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: datalens-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
+    plan: starter  # Starter or higher required for Persistent Disks on Render
+    healthCheckPath: /health
+    disk:
+      name: datalens-storage
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: STORAGE_ENGINE
+        value: disk
+      - key: DATASET_STORAGE_DIR
+        value: /data/dataset_storage
+      - key: CHROMA_PERSIST_DIR
+        value: /data/chroma_db
+      - key: AI_MODEL
+        value: gemini-2.5-flash
+      - key: GOOGLE_API_KEY
+        sync: false  # Injected securely via Render Dashboard environment secrets
+      - key: CORS_ORIGINS
+        sync: false  # Configure with your production frontend URL (e.g. https://datalens-frontend.onrender.com)
+      - key: CORS_ALLOW_CREDENTIALS
+        value: "false"
+      - key: RATE_LIMIT_UPLOAD
+        value: 10/minute
+      - key: RATE_LIMIT_CHAT
+        value: 30/minute
+      - key: RATE_LIMIT_FILTER
+        value: 120/minute
+      - key: RATE_LIMIT_DEFAULT
+        value: 60/minute
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_LEVEL
+        value: INFO
+
+  # ---------------------------------------------------------------------------
+  # Frontend Static Site (React 18 + Vite Production Build)
+  # ---------------------------------------------------------------------------
+  - type: static
+    name: datalens-frontend
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    plan: free
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false  # Set to backend URL (e.g. https://datalens-backend.onrender.com)
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

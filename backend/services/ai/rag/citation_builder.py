@@ -23,6 +23,8 @@ class CitationBuilder:
             metadata = chunk.get("metadata") or {}
             citation = {
                 "chunk_id": metadata.get("chunk_id") or chunk.get("id"),
+                "dataset_id": metadata.get("dataset_id"),
+                "text": chunk.get("document", ""),
                 "row_start": metadata.get("row_start"),
                 "row_end": metadata.get("row_end"),
                 "filename": metadata.get("filename"),

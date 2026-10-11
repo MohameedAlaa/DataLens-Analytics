@@ -172,6 +172,7 @@ export default function AdvancedDataTable() {
           <div className="relative">
             <button
               onClick={() => setShowColMenu(!showColMenu)}
+              aria-label="Toggle column visibility menu"
               className="px-3 py-1.5 rounded-xl border border-surface-border bg-surface-elevated body-xs text-content-secondary hover:text-content-primary flex items-center gap-1.5 transition-colors"
             >
               <Eye className="w-3.5 h-3.5 text-brand-400" />
@@ -198,6 +199,7 @@ export default function AdvancedDataTable() {
           {/* Freeze First Column Toggle */}
           <button
             onClick={() => setFreezeFirstCol(!freezeFirstCol)}
+            aria-label={freezeFirstCol ? "Unfreeze first column" : "Freeze first column"}
             className={`px-3 py-1.5 rounded-xl border body-xs flex items-center gap-1.5 transition-all ${
               freezeFirstCol
                 ? 'border-brand-500/40 bg-brand-500/10 text-brand-400 font-semibold'
@@ -211,6 +213,7 @@ export default function AdvancedDataTable() {
           {/* CSV Export */}
           <button
             onClick={exportCSV}
+            aria-label="Export filtered data to CSV"
             className="px-3 py-1.5 rounded-xl border border-surface-border bg-surface-elevated body-xs text-content-primary hover:bg-brand-500/10 hover:border-brand-500/30 flex items-center gap-1.5 transition-colors font-medium"
           >
             <Download className="w-3.5 h-3.5 text-brand-400" />
@@ -220,6 +223,7 @@ export default function AdvancedDataTable() {
           {/* Full Screen Toggle */}
           <button
             onClick={() => setIsFullScreen(!isFullScreen)}
+            aria-label={isFullScreen ? "Exit full screen view" : "Open full screen view"}
             className="p-1.5 rounded-xl border border-surface-border bg-surface-elevated text-content-secondary hover:text-content-primary transition-colors"
             title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
           >
@@ -340,6 +344,7 @@ export default function AdvancedDataTable() {
             <button
               onClick={() => setPage(1)}
               disabled={currentPage === 1}
+              aria-label="Go to first page"
               className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
             >
               <ChevronsLeft className="w-4 h-4" />
@@ -347,6 +352,7 @@ export default function AdvancedDataTable() {
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
+              aria-label="Go to previous page"
               className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -354,6 +360,7 @@ export default function AdvancedDataTable() {
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
+              aria-label="Go to next page"
               className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
             >
               <ChevronRight className="w-4 h-4" />
@@ -361,6 +368,7 @@ export default function AdvancedDataTable() {
             <button
               onClick={() => setPage(totalPages)}
               disabled={currentPage === totalPages}
+              aria-label="Go to last page"
               className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
             >
               <ChevronsRight className="w-4 h-4" />

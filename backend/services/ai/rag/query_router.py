@@ -41,6 +41,10 @@ class QueryRouter:
             "sample",
             "context",
         ]
+        
+        # We rely on AnalyticsEngine to do the deep parsing, but the router needs to set needs_stats.
+        # Use word boundaries so "country" doesn't match "count".
+        import re
         stats_keywords = [
             "average",
             "mean",
@@ -55,18 +59,34 @@ class QueryRouter:
             "total",
             "count",
             "max",
+            "maximum",
             "min",
+            "minimum",
+            "how many",
+            "number of",
+            "highest",
+            "lowest",
+            "largest",
+            "smallest",
+            "most"
         ]
 
-        needs_retrieval = any(keyword in normalized for keyword in retrieval_keywords)
-        needs_stats = any(keyword in normalized for keyword in stats_keywords)
+        needs_retrieval = any(re.search(r'\b' + re.escape(kw) + r'\b', normalized) for kw in retrieval_keywords)
+        needs_stats = any(re.search(r'\b' + re.escape(kw) + r'\b', normalized) for kw in stats_keywords)
+        
+        # Handle "percentage" or "%" specifically
+        if "percent" in normalized or "%" in normalized:
+            needs_stats = True
 
-        if needs_stats and not needs_retrieval:
-            needs_retrieval = True
+        reason = "fallback"
+        if needs_stats:
+            reason = "analytics"
+        elif needs_retrieval:
+            reason = "semantic"
 
         return {
             "needs_retrieval": needs_retrieval,
             "needs_stats": needs_stats,
-            "reason": "semantic" if needs_retrieval else "fallback",
+            "reason": reason,
             "retrieval_top_k": 3,
         }

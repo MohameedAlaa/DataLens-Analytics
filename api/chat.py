@@ -20,12 +20,22 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.api_helpers import (
-    AIRateLimitError,
-    AIUnavailableError,
-    generate_chat_response_async,
-)
-from backend.dataset_manager import dataset_manager
+try:
+    from backend.api_helpers import (
+        AIRateLimitError,
+        AIUnavailableError,
+        check_dataset_ready,
+        generate_chat_response_async,
+    )
+    from backend.dataset_manager import dataset_manager
+except ImportError:
+    from api_helpers import (
+        AIRateLimitError,
+        AIUnavailableError,
+        check_dataset_ready,
+        generate_chat_response_async,
+    )
+    from dataset_manager import dataset_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -47,15 +57,20 @@ class ChatRequest(BaseModel):
     dataset_id: str                             # Required — from /upload response
     history: List[ChatMessage] = Field(default_factory=list)
     filename: Optional[str] = None              # Deprecated — ignored if dataset_id resolves
+    filters: Optional[Dict[str, Any]] = None    # Filters active in the UI
 
 
 @router.post("/")
-async def chat(req: ChatRequest) -> Dict[str, str]:
+async def chat(req: ChatRequest) -> Dict[str, Any]:
     """Handle an AI chat query about a previously uploaded dataset.
 
     The dataset is resolved from the DatasetManager by dataset_id.
     No dataset rows are accepted or expected in the request body.
     """
+    # Enforce lifecycle state (PENDING -> PROCESSING -> READY)
+    meta = dataset_manager.get_metadata(req.dataset_id)
+    check_dataset_ready(meta)
+
     # Retrieve the dataset from internal storage (no data in request body)
     df = dataset_manager.get_dataset(req.dataset_id)
     if df is None:
@@ -67,7 +82,6 @@ async def chat(req: ChatRequest) -> Dict[str, str]:
             ),
         )
 
-    meta = dataset_manager.get_metadata(req.dataset_id)
     display_name = meta.get("filename", req.dataset_id) if meta else req.dataset_id
     resolved_id = meta.get("dataset_id", req.dataset_id) if meta else req.dataset_id
 
@@ -80,6 +94,7 @@ async def chat(req: ChatRequest) -> Dict[str, str]:
             data_or_df=df,
             filename=display_name,
             dataset_id=resolved_id,
+            filters=req.filters,
         )
     except AIRateLimitError as exc:
         logger.warning("AI rate limit hit for dataset_id='%s': %s", resolved_id, exc)
