@@ -1,6 +1,6 @@
 services:
   # ---------------------------------------------------------------------------
-  # Backend Web Service (Persistent FastAPI + Uvicorn)
+  # Backend Web Service (FastAPI + Uvicorn - Render Free Tier)
   # ---------------------------------------------------------------------------
   - type: web
     name: datalens-backend
@@ -8,12 +8,8 @@ services:
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
-    plan: starter  # Starter or higher required for Persistent Disks on Render
+    plan: free
     healthCheckPath: /health
-    disk:
-      name: datalens-storage
-      mountPath: /data
-      sizeGB: 10
     envVars:
       - key: PYTHON_VERSION
         value: "3.13.5"
@@ -22,9 +18,9 @@ services:
       - key: STORAGE_ENGINE
         value: disk
       - key: DATASET_STORAGE_DIR
-        value: /data/dataset_storage
+        value: ./dataset_storage
       - key: CHROMA_PERSIST_DIR
-        value: /data/chroma_db
+        value: ./chroma_db
       - key: AI_MODEL
         value: gemini-2.5-flash
       - key: GOOGLE_API_KEY

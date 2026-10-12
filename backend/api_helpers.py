@@ -13,8 +13,6 @@ from services.ai.rag.prompt_builder import PromptBuilder
 from services.ai.rag.query_router import QueryRouter
 from services.ai.rag.retriever import Retriever
 from services.ai.rag.llm_service import RagLLMService
-from services.data.vector_store import ChromaVectorStore
-from services.ai.embeddings.embedding_service import SentenceTransformerEmbeddingService
 
 
 def check_dataset_ready(meta: Optional[Dict[str, Any]]) -> None:

@@ -12,8 +12,6 @@ import pandas as pd
 
 from services.data.document_loader import DatasetDocumentLoader
 from services.ai.rag.chunker import TokenRowChunker
-from services.ai.embeddings.embedding_service import SentenceTransformerEmbeddingService
-from services.data.vector_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +89,8 @@ class IngestionPipeline:
             # Update extended RAG metadata
             import datetime
             rag_meta = {
-                "embedding_model": "all-MiniLM-L6-v2",
-                "embedding_dimension": 384,
+                "embedding_model": "gemini-embedding-001",
+                "embedding_dimension": 768,
                 "chunk_count": len(chunks),
                 "vector_count": vector_count,
                 "indexed_at": datetime.datetime.utcnow().isoformat() + "Z",

@@ -9,6 +9,5 @@ python-multipart>=0.0.6
 python-json-logger>=2.0.0,<4.0.0
 slowapi>=0.1.9,<1.0.0
 chromadb>=0.4.22
-sentence-transformers>=2.3.0
 tiktoken>=0.5.2
 

@@ -16,5 +16,4 @@ slowapi>=0.1.9,<1.0.0
 
 # RAG Ingestion Pipeline
 chromadb>=0.4.22
-sentence-transformers>=2.3.0
 tiktoken>=0.5.2

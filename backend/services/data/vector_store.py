@@ -54,7 +54,7 @@ class BaseVectorStore(ABC):
 class ChromaVectorStore(BaseVectorStore):
     """Vector store using local ChromaDB."""
 
-    def __init__(self, collection_name: str = "datalens_rag", persist_directory: str = None):
+    def __init__(self, collection_name: str = "datalens_rag_v2", persist_directory: str = None):
         if chromadb is None:
             raise RuntimeError("chromadb is not installed.")
 
@@ -99,22 +99,50 @@ class ChromaVectorStore(BaseVectorStore):
                     clean_meta[k] = str(v)
             metadatas.append(clean_meta)
 
-        self.collection.upsert(
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=metadatas
-        )
+        try:
+            self.collection.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                documents=documents,
+                metadatas=metadatas
+            )
+        except Exception as e:
+            if "dimension" in str(e).lower():
+                logger.warning(
+                    "Dimension mismatch in ChromaDB collection '%s' (%s). Resetting collection for new dimensions...",
+                    self.collection.name,
+                    e,
+                )
+                self.client.delete_collection(self.collection.name)
+                self.collection = self.client.get_or_create_collection(name=self.collection.name)
+                self.collection.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas
+                )
+            else:
+                raise
         logger.info("Inserted %d chunks into ChromaDB.", len(chunks))
 
     def search(
         self, query_embedding: List[float], dataset_id: str, top_k: int = 5
     ) -> List[Dict[str, Any]]:
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where={"dataset_id": dataset_id}
-        )
+        try:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                where={"dataset_id": dataset_id}
+            )
+        except Exception as e:
+            if "dimension" in str(e).lower():
+                logger.warning(
+                    "Dimension mismatch during ChromaDB search in collection '%s' (%s). Returning empty results.",
+                    self.collection.name,
+                    e,
+                )
+                return []
+            raise
 
         matches = []
         if results and results.get("ids") and results["ids"][0]:
