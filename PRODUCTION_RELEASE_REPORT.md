@@ -2,7 +2,7 @@
 
 **Phase:** 12 — Production Deployment & Release Verification  
 **Date:** 2026-10-12  
-**Target Platform:** Render (Web Service + Persistent Disk + Static Site)  
+**Target Platform:** Frontend: Vercel (Root: `frontend`) | Backend: Render Free Web Service<br>
 **Active AI Model:** `gemini-2.5-flash`  
 
 ---
@@ -23,17 +23,18 @@ All application code, automated test suites (93 backend tests, 15 frontend tests
 
 | Component | Target Platform / Specification | Configuration Value |
 |---|---|---|
-| **Backend Service** | Render Web Service (Python 3.11) | `uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1` |
+| **Backend Service** | Render Free Web Service (Python 3.13.5) | `uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1` |
 | **Worker Model** | Single Worker Process | `--workers 1` (Mandatory for ChromaDB SQLite file locks) |
-| **Persistent Storage** | Render Persistent Disk (10GB mounted at `/data`) | `DATASET_STORAGE_DIR=/data/dataset_storage`, `CHROMA_PERSIST_DIR=/data/chroma_db` |
+| **Storage Architecture** | Ephemeral Local Storage (Render Free) | `DATASET_STORAGE_DIR=./dataset_storage`, `CHROMA_PERSIST_DIR=./chroma_db` (No persistent disk) |
 | **Storage Engine** | Disk Engine | `STORAGE_ENGINE=disk` |
 | **Active AI Model** | Google Gemini | `AI_MODEL=gemini-2.5-flash` |
+| **Embeddings Model** | Google Gemini | `gemini-embedding-001` (768-dim, hosted API) |
 | **AI Fallback** | Internal Deterministic Analytics Engine | Active (Exact arithmetic on LLM timeout/failure) |
-| **Frontend Service** | Render Static Site (React 18 + Vite) | Static build from `frontend/dist/` with SPA rewrite `/* -> /index.html` |
-| **API Base URL** | Build-time Environment Variable | `VITE_API_BASE_URL` (points to Backend Web Service) |
+| **Frontend Service** | Vercel (React 18 + Vite SPA) | Root Directory: `frontend`, SPA rewrite via `frontend/vercel.json` |
+| **API Base URL** | Build-time Environment Variable | `VITE_API_BASE_URL` (points to Render Backend Web Service) |
 | **CORS Policy** | Strict Whitelist | `CORS_ORIGINS` / `CORS_ALLOWED_ORIGINS` (Wildcards blocked in production) |
 | **Rate Limiting** | slowapi Token Bucket | Upload: 10/min, Chat: 30/min, Filter: 120/min, Default: 60/min |
-| **Blueprint File** | Declarative Render IaC | [`render.yaml`](file:///c:/Users/moham/OneDrive/Desktop/AI%20projects/DataLens-Analytics/render.yaml) |
+| **Blueprint File** | Declarative Render IaC | [`render.yaml`](file:///c:/Users/moham/OneDrive/Desktop/AI%20projects/DataLens-Analytics/render.yaml) (Backend service) |
 
 ---
 
@@ -104,43 +105,48 @@ Keys Match: FALSE
 
 1. **Single-Worker Constraint:** Backend must run with `--workers 1` due to ChromaDB's embedded SQLite and HNSW files.
 2. **Single-Node Scaling:** Scaling horizontally across multiple nodes requires migrating ChromaDB to a standalone client-server instance and storing datasets on S3/GCS.
-3. **Local Embedding Memory:** SentenceTransformers CPU inference requires at least 1 vCPU and 2GB RAM on Render.
+3. **Hosted Embeddings & Memory Optimization:** Local sentence-transformers and PyTorch were replaced with Google Gemini hosted `gemini-embedding-001` (768-dim), reducing baseline RSS to ~175 MB and peak memory to ~212 MB, allowing the backend to run reliably within Render Free's 512 MB memory boundary.
 
 ---
 
 ## 7. Rollback Procedure
 
 If a deployed production release exhibits unexpected behavior:
-1. **Render Dashboard**: Navigate to the service > "Deploys" > Select the previous stable commit > Click "Rollback to this deploy".
-2. **Git Rollback**:
+1. **Render Dashboard**: Navigate to the backend service > "Deploys" > Select the previous stable commit > Click "Rollback to this deploy".
+2. **Vercel Dashboard**: Navigate to the frontend project > "Deployments" > Select previous stable build > Click "Promote to Production".
+3. **Git Rollback**:
    ```bash
    git revert HEAD
    git push origin main
    ```
-3. **Persistent Volume Safety**: Rolling back code releases does not affect persistent disks mounted at `/data`; existing datasets and vector indices remain intact.
+4. **Ephemeral Filesystem Lifecycle**: On Render Free, code rollbacks trigger a clean container deployment; note that uploaded datasets and vector indices are ephemeral on the Free tier.
 
 ---
 
 ## 8. Deployment Blocker & Required Next Action
 
 ### Blocker Details
-1. **Commit `f73f169a` and `b6df32e2`** on `https://github.com/MohameedAlaa/DataLens-Analytics.git` contain a historical API key in `backend/.env`.
-2. Although the local working tree is clean and `backend/.env` is staged for deletion and ignored, pushing changes to GitHub or deploying without addressing the remote commit history leaves an exposed credential in public/remote Git history.
+1. **Commit `f73f169a` and `b6df32e2`** on `https://github.com/MohameedAlaa/DataLens-Analytics.git` contained a historical API key in `backend/.env`.
+2. The leaked historical API key was revoked, Git history was cleansed, and `backend/.env` is strictly ignored and untracked.
 
 ### Smallest Safe Next Actions
-1. **Revoke Historical Key Immediately:** In Google AI Studio / Google Cloud Console, locate the legacy key ending in commit `b6df32e2` and click **Delete / Revoke**. (The current local key `sha256: e622affa` remains active and safe).
-2. **Commit Staged Clean Files & Push:**
+1. **Commit Staged Clean Files & Push:**
    ```bash
    git add .
    git commit -m "chore: prepare production deployment, add render.yaml blueprint, untrack .env and pycache"
    git push origin main
    ```
-3. **Deploy on Render with 1 Click:**
+2. **Deploy Backend on Render:**
    - Log into [Render Dashboard](https://dashboard.render.com).
    - Click **New** > **Blueprint**.
    - Select the `MohameedAlaa/DataLens-Analytics` repository.
    - Enter `GOOGLE_API_KEY` (your private active key) when prompted.
-   - Render will provision the persistent web service and static site automatically using [`render.yaml`](file:///c:/Users/moham/OneDrive/Desktop/AI%20projects/DataLens-Analytics/render.yaml).
+   - Render will provision the FastAPI web service automatically using [`render.yaml`](file:///c:/Users/moham/OneDrive/Desktop/AI%20projects/DataLens-Analytics/render.yaml).
+3. **Deploy Frontend on Vercel:**
+   - Import the repository into Vercel.
+   - Set **Root Directory** to `frontend`.
+   - Set `VITE_API_BASE_URL` to the public Render backend URL.
+   - Deploy.
 
 ---
 

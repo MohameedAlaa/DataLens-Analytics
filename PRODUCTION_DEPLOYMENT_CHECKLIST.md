@@ -2,7 +2,7 @@
 
 **Phase:** 11 — Production Deployment Preparation  
 **Model Configured:** `gemini-2.5-flash`  
-**Storage Architecture:** Persistent Disk (`STORAGE_ENGINE=disk`) + Single-Worker Uvicorn  
+**Storage Architecture:** Ephemeral Local Storage (`STORAGE_ENGINE=disk`) + Single-Worker Uvicorn (Render Free)
 
 ---
 
@@ -27,8 +27,9 @@ Verify all prerequisites locally and in CI/CD pipelines before initiating cloud 
 
 ### Configuration & Persistence Alignment
 - [x] **AI Model Set**: `AI_MODEL=gemini-2.5-flash` verified in `backend/config.py` and template `.env.example`.
-- [x] **Persistence Engine Set**: `STORAGE_ENGINE=disk` configured in environment template.
-- [x] **Persistent Directories Defined**: `DATASET_STORAGE_DIR` and `CHROMA_PERSIST_DIR` paths mapped to durable volume paths.
+- [x] **Embeddings Architecture Set**: Gemini `gemini-embedding-001` (768-dim) verified; zero local PyTorch/sentence-transformers dependencies.
+- [x] **Storage Engine Set**: `STORAGE_ENGINE=disk` configured in `render.yaml` and environment templates.
+- [x] **Ephemeral Directories Defined**: `DATASET_STORAGE_DIR=./dataset_storage` and `CHROMA_PERSIST_DIR=./chroma_db` configured for Render Free.
 - [x] **Worker Model Fixed**: Single worker (`--workers 1`) documented as mandatory for ChromaDB / SQLite concurrency safety.
 - [x] **Deterministic Analytics Retained**: Mathematical queries routed with exact arithmetic fallback in case of LLM outage.
 
@@ -38,44 +39,48 @@ Verify all prerequisites locally and in CI/CD pipelines before initiating cloud 
 
 Follow these sequential steps during active infrastructure provisioning:
 
-### Step A: Backend Provisioning (PaaS / Docker / VPS)
-1. **Target Platform Selection**: Deploy to a container or VPS provider that supports persistent storage volumes (Render Web Service with Persistent Disk, Railway with Volume, Fly.io with Mount, or AWS ECS with EFS).
-2. **Attach Persistent Storage Volume**:
-   - Create and mount a durable volume (e.g. `/data` or `/var/lib/datalens`).
-   - Configure directory paths:
-     - `DATASET_STORAGE_DIR=/data/dataset_storage`
-     - `CHROMA_PERSIST_DIR=/data/chroma_db`
+### Step A: Backend Provisioning (Render Free Web Service)
+1. **Target Platform Selection**: Deploy to Render as a Web Service using declarative blueprint [`render.yaml`](file:///c:/Users/moham/OneDrive/Desktop/AI%20projects/DataLens-Analytics/render.yaml) (`plan: free`).
+2. **Storage Configuration**:
+   - Render Free uses container ephemeral storage (`STORAGE_ENGINE=disk`).
+   - Ephemeral directory paths:
+     - `DATASET_STORAGE_DIR=./dataset_storage`
+     - `CHROMA_PERSIST_DIR=./chroma_db`
+   - No persistent disk required.
 3. **Inject Backend Environment Secrets**:
    - `APP_ENV=production`
-   - `GOOGLE_API_KEY=<SECRET_PRODUCTION_KEY>`
+   - `PYTHON_VERSION=3.13.5`
+   - `GOOGLE_API_KEY=<SECRET_PRODUCTION_KEY>` (injected securely as a Render Dashboard secret)
    - `AI_MODEL=gemini-2.5-flash`
    - `STORAGE_ENGINE=disk`
-   - `CORS_ORIGINS=https://app.datalens.yourdomain.com` (your exact frontend URL)
+   - `DATASET_STORAGE_DIR=./dataset_storage`
+   - `CHROMA_PERSIST_DIR=./chroma_db`
+   - `CORS_ORIGINS=https://your-frontend.vercel.app` (your exact Vercel frontend URL)
    - `CORS_ALLOW_CREDENTIALS=false`
-   - `TRUSTED_PROXIES=<REVERSE_PROXY_OR_LOAD_BALANCER_IPS>`
    - `RATE_LIMIT_UPLOAD=10/minute`
    - `RATE_LIMIT_CHAT=30/minute`
    - `RATE_LIMIT_FILTER=120/minute`
+   - `RATE_LIMIT_DEFAULT=60/minute`
+   - `LOG_FORMAT=json`
 4. **Configure Start Command**:
    ```bash
-   uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
+   uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
    ```
 5. **Verify Backend Liveness**:
    - Issue request to `GET /health`.
    - Confirm HTTP 200 response: `{"status":"ok","env":"production",...}`.
 
-### Step B: Frontend Static Deployment (Vercel / Netlify / Cloudflare / S3)
-1. **Set Build Environment Variable**:
-   - Set `VITE_API_BASE_URL=https://api.datalens.yourdomain.com` (public HTTPS URL of backend).
-2. **Execute Build**:
-   ```bash
-   npm run build
-   ```
-3. **Publish Static Assets**:
-   - Publish `dist/` directory.
-   - Configure Single Page Application rewrite rule: `/* -> /index.html` (HTTP 200).
+### Step B: Frontend Static Deployment (Vercel)
+1. **Target Platform Selection**: Deploy to Vercel with **Root Directory** set to `frontend`.
+2. **Set Build Environment Variable**:
+   - Set `VITE_API_BASE_URL=https://datalens-backend.onrender.com` (public HTTPS URL of Render backend).
+3. **Build & Routing Configuration**:
+   - Install command: `npm install`
+   - Build command: `npm run build` (`vite build`)
+   - Output directory: `dist`
+   - SPA routing: Handled via [`frontend/vercel.json`](file:///c:/Users/moham/OneDrive/Desktop/AI%20projects/DataLens-Analytics/frontend/vercel.json) (`rewrites: [{"source": "/(.*)", "destination": "/index.html"}]`).
 4. **Enforce HTTPS**:
-   - Ensure TLS/SSL is active and HTTP redirects to HTTPS.
+   - Vercel automatically enforces TLS/SSL and redirects HTTP to HTTPS.
 
 ---
 
@@ -114,6 +119,6 @@ Execute this manual or automated validation protocol immediately following deplo
 - [ ] **9. Negative File Resilience**:
   - Attempt upload of invalid or empty CSV (e.g. `test_fixtures/empty_rows.csv`).
   - Confirm clear error toast/feedback in UI; confirm application does not crash.
-- [ ] **10. Persistence Across Container Restart**:
-  - Restart the production backend container service.
-  - Refresh browser; verify existing dataset UUID session remains valid and accessible without HTTP 404.
+- [ ] **10. Ephemeral Storage Lifecycle on Render Free**:
+  - Note that on Render Free, uploaded datasets and ChromaDB indices persist across requests during active runtime.
+  - On cold container spin-down or new deployment, ephemeral filesystem resets cleanly, requiring a fresh dataset upload.
