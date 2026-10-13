@@ -393,24 +393,41 @@ export default function AIInsightsSection({ onPromptSelect }) {
   const StatusIcon = healthStatus.Icon;
 
   // ── Section toggle header ──────────────────────────────────────────────
-  const SectionToggle = ({ id, title, icon: Icon, badge, children }) => (
-    <div className="rounded-2xl border border-surface-border bg-surface-card/90 overflow-hidden shadow-card hover:border-surface-borderStrong transition-all duration-150">
-      <button
-        onClick={() => toggleSection(id)}
-        className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-surface-elevated/40 transition-colors"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-surface-elevated border border-surface-border text-brand-400">
-            <Icon className="w-4 h-4" />
+  // ── Section toggle header with smooth grid motion ──────────────────────
+  const SectionToggle = ({ id, title, icon: Icon, badge, children }) => {
+    const isExpanded = !!expandedSections[id];
+    return (
+      <div className="rounded-2xl border border-surface-border bg-surface-card/90 overflow-hidden shadow-card hover:border-surface-borderStrong transition-all duration-150">
+        <button
+          onClick={() => toggleSection(id)}
+          aria-expanded={isExpanded}
+          className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-surface-elevated/40 active:bg-surface-elevated/60 transition-colors focus-visible:outline-none"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-surface-elevated border border-surface-border text-brand-400">
+              <Icon className="w-4 h-4" />
+            </div>
+            <span className="text-xs font-bold text-content-primary tracking-tight uppercase">{title}</span>
+            {badge && <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-brand-500/10 text-brand-400 rounded-md border border-brand-500/20">{badge}</span>}
           </div>
-          <span className="text-xs font-bold text-content-primary tracking-tight uppercase">{title}</span>
-          {badge && <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-brand-500/10 text-brand-400 rounded-md border border-brand-500/20">{badge}</span>}
+          <ChevronDown
+            className={`w-4 h-4 text-content-muted transition-transform duration-200 motion-reduce:transition-none ${
+              isExpanded ? 'rotate-180' : 'rotate-0'
+            }`}
+          />
+        </button>
+        <div
+          className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+            isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+          }`}
+        >
+          <div className="overflow-hidden">
+            <div className="px-4 sm:px-5 pb-5">{children}</div>
+          </div>
         </div>
-        {expandedSections[id] ? <ChevronUp className="w-4 h-4 text-content-muted" /> : <ChevronDown className="w-4 h-4 text-content-muted" />}
-      </button>
-      {expandedSections[id] && <div className="px-4 sm:px-5 pb-5">{children}</div>}
-    </div>
-  );
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -547,7 +564,7 @@ export default function AIInsightsSection({ onPromptSelect }) {
                         <div className={`h-full rounded-full ${isPositive ? 'bg-emerald-400' : 'bg-red-400'}`} style={{ width: `${Math.abs(pair.val) * 100}%` }} />
                       </div>
                       <span className={`text-xs font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>{pair.val}</span>
-                      {isStrong && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-brand-500 text-white">Strong</span>}
+                      {isStrong && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-brand-400 text-[#111215]">Strong</span>}
                     </div>
                   </div>
                   <p className="text-[11px] text-content-muted mt-1.5">

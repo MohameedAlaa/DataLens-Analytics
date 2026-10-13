@@ -81,7 +81,7 @@ West,Enterprise,6100,25,Q2`,
 
         <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-content-primary">
           Turn Raw Datasets into{' '}
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-accent-400 to-indigo-400">
+          <span className="text-brand-400">
             Actionable Intelligence
           </span>
         </h1>
@@ -130,7 +130,7 @@ West,Enterprise,6100,25,Q2`,
             w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-200
             ${loading
               ? 'bg-brand-500/20 text-brand-400 animate-pulse'
-              : 'bg-gradient-to-br from-brand-500/15 to-accent-500/15 border border-brand-500/20 text-brand-400 shadow-inner'
+              : 'bg-brand-500/10 border border-brand-500/20 text-brand-400 shadow-inner'
             }
           `}>
             {loading ? (
@@ -156,10 +156,10 @@ West,Enterprise,6100,25,Q2`,
               <FileText className="w-3.5 h-3.5 text-brand-400" /> CSV
             </span>
             <span className="px-2.5 py-1 rounded-lg bg-surface-elevated/70 border border-surface-border body-xs text-content-secondary flex items-center gap-1.5">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" /> Excel
+              <FileSpreadsheet className="w-3.5 h-3.5 text-brand-400" /> Excel
             </span>
             <span className="px-2.5 py-1 rounded-lg bg-surface-elevated/70 border border-surface-border body-xs text-content-secondary flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-accent-400" /> Isolated & Secure
+              <ShieldCheck className="w-3.5 h-3.5 text-terracotta-400" /> Isolated & Secure
             </span>
           </div>
 
@@ -212,7 +212,7 @@ West,Enterprise,6100,25,Q2`,
                 loadSampleDataset(sample);
               }}
               className="p-4 rounded-2xl border border-surface-border bg-surface-card/70 hover:bg-surface-elevated/80
-                         hover:border-brand-500/30 text-left transition-all duration-150 group flex items-center justify-between"
+                         hover:border-brand-500/30 text-left transition-all duration-150 active:scale-[0.98] group flex items-center justify-between"
             >
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
@@ -233,7 +233,7 @@ West,Enterprise,6100,25,Q2`,
 
       {/* ── Feature Highlights Grid ───────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-surface-border/60">
-        <div className="p-4 rounded-2xl bg-surface-card/40 border border-surface-border/60 space-y-2">
+        <div className="p-4 rounded-2xl bg-surface-card/60 border border-surface-border space-y-2">
           <div className="w-8 h-8 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400">
             <BarChart3 className="w-4 h-4" />
           </div>
@@ -243,8 +243,8 @@ West,Enterprise,6100,25,Q2`,
           </p>
         </div>
 
-        <div className="p-4 rounded-2xl bg-surface-card/40 border border-surface-border/60 space-y-2">
-          <div className="w-8 h-8 rounded-xl bg-accent-500/10 border border-accent-500/20 flex items-center justify-center text-accent-400">
+        <div className="p-4 rounded-2xl bg-surface-card/60 border border-surface-border space-y-2">
+          <div className="w-8 h-8 rounded-xl bg-terracotta-500/10 border border-terracotta-500/20 flex items-center justify-center text-terracotta-400">
             <Zap className="w-4 h-4" />
           </div>
           <h3 className="text-xs font-bold text-content-primary">ChromaDB Vector RAG</h3>
@@ -253,8 +253,8 @@ West,Enterprise,6100,25,Q2`,
           </p>
         </div>
 
-        <div className="p-4 rounded-2xl bg-surface-card/40 border border-surface-border/60 space-y-2">
-          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+        <div className="p-4 rounded-2xl bg-surface-card/60 border border-surface-border space-y-2">
+          <div className="w-8 h-8 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400">
             <ShieldCheck className="w-4 h-4" />
           </div>
           <h3 className="text-xs font-bold text-content-primary">Dataset Isolation</h3>

@@ -15,17 +15,23 @@ import AdvancedDataTable from './AdvancedDataTable';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const PALETTE = [
-  '#0ea5e9', '#06b6d4', '#10b981', '#f59e0b',
-  '#8b5cf6', '#ec4899', '#3b82f6', '#f97316',
+  '#d4f237', // Acid Lime (Primary)
+  '#e06d53', // Warm Terracotta (Secondary)
+  '#f5f4ef', // Warm Ivory
+  '#f59e0b', // Muted Amber
+  '#14b8a6', // Olive Teal
+  '#a1a1aa', // Flint Gray
+  '#d97706', // Warm Ochre
+  '#c8573d', // Dark Rust
 ];
 
 const TOOLTIP_STYLE = {
-  backgroundColor: '#0b1222',
+  backgroundColor: '#181a1f',
   borderColor: 'rgba(255, 255, 255, 0.12)',
-  borderRadius: '0.875rem',
+  borderRadius: '0.75rem',
   fontSize: '11px',
-  color: '#f8fafc',
-  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+  color: '#f5f4ef',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
   padding: '8px 12px',
 };
 
@@ -109,14 +115,14 @@ function buildHeatmapCells(rows, numericCols) {
   return cells;
 }
 
-/** Interpolate red-green for correlation values [-1, 1] */
+/** Interpolate terracotta-lime for correlation values [-1, 1] */
 function corrColor(val) {
   if (val >= 0) {
     const t = val;
-    return `rgba(16,185,129,${0.15 + t * 0.65})`;   // emerald
+    return `rgba(212,242,55,${0.12 + t * 0.7})`;   // acid lime
   }
   const t = -val;
-  return `rgba(239,68,68,${0.15 + t * 0.65})`;       // red
+  return `rgba(224,109,83,${0.12 + t * 0.7})`;    // warm terracotta
 }
 
 // ── Shared card wrapper ───────────────────────────────────────────────────────
@@ -198,15 +204,15 @@ function NumericTrendChart({ rows, numericColumns }) {
             <AreaChart data={data} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
               <defs>
                 <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.7} />
-                  <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#d4f237" stopOpacity={0.5} />
+                  <stop offset="95%" stopColor="#d4f237" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-              <XAxis dataKey="i" stroke="#64748b" fontSize={9} tickLine={false} label={{ value: `row (sampled)`, position: 'insideBottomRight', offset: -4, fontSize: 8, fill: '#64748b' }} />
-              <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
+              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
+              <XAxis dataKey="i" stroke="#71717a" fontSize={9} tickLine={false} label={{ value: `row (sampled)`, position: 'insideBottomRight', offset: -4, fontSize: 8, fill: '#71717a' }} />
+              <YAxis stroke="#71717a" fontSize={9} tickLine={false} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [v.toFixed(2), active]} />
-              <Area type="monotone" dataKey="v" stroke="#0ea5e9" strokeWidth={1.5} fillOpacity={1} fill="url(#trendGrad)" dot={false} />
+              <Area type="monotone" dataKey="v" stroke="#d4f237" strokeWidth={1.5} fillOpacity={1} fill="url(#trendGrad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         ) : <EmptyChart message="No numeric data available." />}
@@ -226,19 +232,19 @@ function HistogramChart({ rows, numericColumns }) {
     <ChartCard
       title={`Histogram — ${active || 'N/A'}`}
       icon={BarChart3}
-      iconColor="bg-purple-500/10 text-purple-400 border-purple-500/20"
-      accentClass="hover:border-purple-500/20"
-      selector={<ColSelect value={active} options={numericColumns} onChange={setCol} accent="purple" />}
+      iconColor="bg-terracotta-500/10 text-terracotta-400 border-terracotta-500/20"
+      accentClass="hover:border-terracotta-500/20"
+      selector={<ColSelect value={active} options={numericColumns} onChange={setCol} accent="terracotta" />}
     >
       <div className="h-56 w-full">
         {bins.length ? (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={bins} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-              <XAxis dataKey="bin" stroke="#64748b" fontSize={8} tickLine={false} interval="preserveStartEnd" />
-              <YAxis stroke="#64748b" fontSize={9} tickLine={false} />
+              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
+              <XAxis dataKey="bin" stroke="#71717a" fontSize={8} tickLine={false} interval="preserveStartEnd" />
+              <YAxis stroke="#71717a" fontSize={9} tickLine={false} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n, p) => [v, `freq [${Number(p.payload.range?.[0]).toFixed(1)}, ${Number(p.payload.range?.[1]).toFixed(1)})`]} />
-              <Bar dataKey="count" fill="#8b5cf6" radius={[2, 2, 0, 0]} maxBarSize={32} />
+              <Bar dataKey="count" fill="#e06d53" radius={[2, 2, 0, 0]} maxBarSize={32} />
             </BarChart>
           </ResponsiveContainer>
         ) : <EmptyChart message="Insufficient numeric data for histogram." />}
@@ -265,13 +271,13 @@ function ScatterPlotChart({ rows, numericColumns }) {
     <ChartCard
       title={`Scatter — ${activeX} vs ${activeY}`}
       icon={ScatterIcon}
-      iconColor="bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
-      accentClass="hover:border-cyan-500/20"
+      iconColor="bg-brand-500/10 text-brand-400 border-brand-500/20"
+      accentClass="hover:border-brand-500/20"
       selector={
         <div className="flex items-center gap-1.5 flex-wrap">
-          <ColSelect value={activeX} options={numericColumns} onChange={setColX} accent="cyan" />
+          <ColSelect value={activeX} options={numericColumns} onChange={setColX} accent="brand" />
           <span className="body-xs text-content-muted">vs</span>
-          <ColSelect value={activeY} options={numericColumns} onChange={setColY} accent="cyan" />
+          <ColSelect value={activeY} options={numericColumns} onChange={setColY} accent="brand" />
         </div>
       }
     >
@@ -279,12 +285,12 @@ function ScatterPlotChart({ rows, numericColumns }) {
         {data.length ? (
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-              <XAxis dataKey="x" type="number" name={activeX} stroke="#64748b" fontSize={9} tickLine={false} />
-              <YAxis dataKey="y" type="number" name={activeY} stroke="#64748b" fontSize={9} tickLine={false} />
+              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" />
+              <XAxis dataKey="x" type="number" name={activeX} stroke="#71717a" fontSize={9} tickLine={false} />
+              <YAxis dataKey="y" type="number" name={activeY} stroke="#71717a" fontSize={9} tickLine={false} />
               <ZAxis range={[12, 12]} />
               <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ strokeDasharray: '3 3' }} formatter={(v, n) => [Number(v).toFixed(2), n]} />
-              <Scatter data={data} fill="#06b6d4" fillOpacity={0.65} />
+              <Scatter data={data} fill="#d4f237" fillOpacity={0.65} />
             </ScatterChart>
           </ResponsiveContainer>
         ) : <EmptyChart message="Select two different numeric columns." />}
@@ -529,9 +535,9 @@ function CorrelationHeatmap({ rows, numericColumns }) {
           ))}
           {/* Color scale legend */}
           <div className="flex items-center gap-2 mt-2 px-1">
-            <span className="text-[9px] text-red-400">−1</span>
-            <div className="h-2 flex-1 rounded" style={{ background: 'linear-gradient(to right, rgba(239,68,68,0.8), rgba(30,41,59,0.4), rgba(16,185,129,0.8))' }} />
-            <span className="text-[9px] text-emerald-400">+1</span>
+            <span className="text-[9px] text-terracotta-400 font-mono">−1</span>
+            <div className="h-1.5 flex-1 rounded" style={{ background: 'linear-gradient(to right, rgba(224,109,83,0.8), rgba(32,36,44,0.6), rgba(212,242,55,0.8))' }} />
+            <span className="text-[9px] text-brand-400 font-mono">+1</span>
           </div>
         </div>
       </div>
@@ -560,18 +566,18 @@ function RadarProfileChart({ rows, numericColumns }) {
     <ChartCard
       title="Numeric Profile (Radar)"
       icon={Sigma}
-      iconColor="bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20"
-      accentClass="hover:border-fuchsia-500/20"
+      iconColor="bg-brand-500/10 text-brand-400 border-brand-500/20"
+      accentClass="hover:border-brand-500/20"
       badge="normalized"
     >
       <div className="h-56 w-full">
         {data.length >= 3 ? (
           <ResponsiveContainer width="100%" height="100%">
             <RadarChart data={data}>
-              <PolarGrid stroke="#1e293b" />
-              <PolarAngleAxis dataKey="col" tick={{ fill: '#64748b', fontSize: 9 }} />
-              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 8 }} />
-              <Radar name="Mean %" dataKey="pct" stroke="#a855f7" fill="#a855f7" fillOpacity={0.3} strokeWidth={2} />
+              <PolarGrid stroke="#27272a" />
+              <PolarAngleAxis dataKey="col" tick={{ fill: '#71717a', fontSize: 9 }} />
+              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#71717a', fontSize: 8 }} />
+              <Radar name="Mean %" dataKey="pct" stroke="#d4f237" fill="#d4f237" fillOpacity={0.25} strokeWidth={2} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, _, p) => [`${v}% (mean: ${p.payload.mean})`, p.payload.col]} />
             </RadarChart>
           </ResponsiveContainer>
@@ -617,25 +623,25 @@ function AnalyticsSummaryCards({ rows, numericColumns, catColumns }) {
       label: 'Rows Analyzed',
       value: rows.length.toLocaleString(),
       hint: rows.length ? 'Active filtered slice' : 'No rows',
-      highlight: 'text-brand-300',
+      highlight: 'text-brand-400',
     },
     {
       label: primaryNum ? `Total ${primaryNum}` : 'Primary Aggregate',
       value: primarySum != null ? primarySum.toLocaleString() : 'N/A',
       hint: primaryNum ? `Sum across ${rows.length} rows` : 'No numeric fields',
-      highlight: 'text-emerald-400',
+      highlight: 'text-content-primary',
     },
     {
       label: 'Feature Dimensions',
       value: `${numericColumns.length} num • ${catColumns.length} cat`,
       hint: 'Multi-variable coverage',
-      highlight: 'text-accent-400',
+      highlight: 'text-terracotta-400',
     },
     {
       label: 'Data Integrity',
       value: rows.length > 0 ? 'Verified' : 'Pending',
       hint: 'Session isolated & clean',
-      highlight: 'text-cyan-400',
+      highlight: 'text-brand-300',
     },
   ];
 

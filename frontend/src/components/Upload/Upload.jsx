@@ -45,7 +45,7 @@ export default function Upload() {
         <button
           disabled={loading}
           aria-label="Browse files to upload"
-          className="rounded-full bg-brand-500 px-5 py-2.5 body-xs font-semibold text-white shadow-lg shadow-brand-500/20 transition hover:bg-brand-600 disabled:opacity-50 flex items-center gap-2"
+          className="rounded-full bg-brand-400 px-5 py-2.5 body-xs font-bold text-[#111215] shadow-lg shadow-brand-400/20 transition hover:bg-brand-500 disabled:opacity-50 flex items-center gap-2"
           onClick={() => inputRef.current && inputRef.current.click()}
         >
           {loading ? (

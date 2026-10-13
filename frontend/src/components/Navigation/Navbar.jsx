@@ -2,13 +2,21 @@ import React from 'react';
 import { useData } from '../../context/DataContext';
 import { useDataset } from '../../hooks/useDataset';
 import DataLensLogo from '../Brand/DataLensLogo';
-import { Database, Filter, Upload, RefreshCw, Menu, Bot, X, Sparkles } from 'lucide-react';
+import { Database, Filter, Upload, RefreshCw, Menu, Bot, X } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab, onToggleMobileSidebar, onToggleMobileCopilot }) {
+export default function Navbar({
+  activeTab, // eslint-disable-line no-unused-vars
+  setActiveTab, // eslint-disable-line no-unused-vars
+  onToggleMobileSidebar,
+  onToggleCopilot,
+  onToggleMobileCopilot,
+  isCopilotOpen = false
+}) {
   const { datasetInfo, filters, clearDataset } = useData();
   const { handleUpload, loading } = useDataset();
   const fileInputRef = React.useRef(null);
 
+  const toggleCopilot = onToggleCopilot || onToggleMobileCopilot;
   const activeFilterCount = filters ? Object.keys(filters).length : 0;
 
   const onFileSelect = async (e) => {
@@ -26,7 +34,7 @@ export default function Navbar({ activeTab, setActiveTab, onToggleMobileSidebar,
     <header
       className="sticky top-0 z-40 h-16 w-full shrink-0
                  border-b border-surface-border bg-surface-bg/95 backdrop-blur-md
-                 px-4 md:px-6 flex items-center gap-3 sm:gap-4"
+                 px-3 sm:px-6 flex items-center gap-2 sm:gap-4"
     >
       {/* ── Mobile Menu Toggle Button (< md) ── */}
       <button
@@ -82,24 +90,30 @@ export default function Navbar({ activeTab, setActiveTab, onToggleMobileSidebar,
       <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 ml-auto">
         {activeFilterCount > 0 && (
           <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg
-                           bg-emerald-500/10 border border-emerald-500/25 body-xs text-emerald-400 font-semibold font-mono">
+                           bg-brand-500/10 border border-brand-500/25 body-xs text-brand-400 font-semibold font-mono">
             <Filter className="w-3 h-3" />
             {activeFilterCount} active filter{activeFilterCount > 1 ? 's' : ''}
           </span>
         )}
 
-        {/* Mobile AI Copilot Drawer Toggle (< lg) */}
-        <button
-          type="button"
-          onClick={onToggleMobileCopilot}
-          className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 body-xs font-semibold rounded-xl
-                     border border-brand-500/30 bg-brand-500/10 text-brand-400 hover:bg-brand-500/20
-                     active:scale-95 transition-all"
-          aria-label="Toggle AI Copilot"
-        >
-          <Bot className="w-4 h-4" />
-          <span className="hidden xs:inline">Copilot</span>
-        </button>
+        {/* AI Copilot Toggle Button */}
+        {toggleCopilot && (
+          <button
+            type="button"
+            onClick={toggleCopilot}
+            aria-label="Toggle AI Copilot"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl
+                        border transition-all active:scale-95 ${
+                          isCopilotOpen
+                            ? 'bg-brand-400 text-[#111215] border-brand-300 shadow-sm shadow-brand-400/20'
+                            : 'border-surface-border bg-surface-elevated/80 text-content-primary hover:border-brand-500/40 hover:text-brand-400'
+                        }`}
+          >
+            <Bot className="w-4 h-4" />
+            <span className="hidden xs:inline">Copilot</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-400" />
+          </button>
+        )}
 
         {/* Hidden File Input */}
         <input

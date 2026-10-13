@@ -247,7 +247,7 @@ export default function AdvancedDataTable() {
                     type="checkbox"
                     checked={paginatedRows.length > 0 && paginatedRows.every((_, i) => selectedRows.includes((currentPage - 1) * pageSize + i))}
                     onChange={toggleSelectAllPage}
-                    className="rounded border-surface-border text-brand-500 focus:ring-0"
+                    className="rounded border-surface-border text-brand-400 accent-brand-400 focus:ring-0"
                   />
                 </th>
                 {visibleColumns.map((col, idx) => (
@@ -282,7 +282,7 @@ export default function AdvancedDataTable() {
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => toggleSelectRow(globalIdx)}
-                        className="rounded border-surface-border text-brand-500 focus:ring-0"
+                        className="rounded border-surface-border text-brand-400 accent-brand-400 focus:ring-0"
                       />
                     </td>
                     {visibleColumns.map((col, cIdx) => {

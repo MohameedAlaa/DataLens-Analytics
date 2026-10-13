@@ -9,51 +9,64 @@ module.exports = {
     extend: {
       colors: {
         brand: {
-          50: '#f0f9ff',
-          100: '#e0f2fe',
-          200: '#bae6fd',
-          300: '#7dd3fc',
-          400: '#38bdf8',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          800: '#075985',
-          900: '#0c4a6e',
+          50: '#f7fee7',
+          100: '#ecfccb',
+          200: '#d9f99d',
+          300: '#bef264',
+          400: '#d4f237', // Acid Lime - Primary Action & Focus Accent
+          500: '#c2e424',
+          600: '#a3c415',
+          700: '#7f9c10',
+          800: '#647c12',
+          900: '#526613',
+          DEFAULT: '#d4f237',
+        },
+        terracotta: {
+          300: '#f49d88',
+          400: '#ea826b',
+          500: '#e06d53', // Warm Terracotta - Restrained Secondary Accent
+          600: '#c8573d',
+          700: '#a23f28',
+          DEFAULT: '#e06d53',
         },
         accent: {
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
+          400: '#e06d53',
+          500: '#c8573d',
+          600: '#a23f28',
         },
         surface: {
-          bg: '#020617',          // Void / Canvas background
-          card: '#0b1222',        // Obsidian glass card background
-          elevated: '#111c35',    // Raised surface / Hover / Drawer
-          overlay: '#162343',     // Modal / Dropdown / Popover
-          border: 'rgba(255, 255, 255, 0.08)',       // Subtle inner border
-          borderSubtle: 'rgba(255, 255, 255, 0.05)',
+          bg: '#111215',          // Deep Graphite / Charcoal canvas
+          card: '#181a1f',        // Architectural Charcoal card surface
+          elevated: '#20242c',    // Raised surface / Hover / Drawer
+          overlay: '#262b35',     // Modal / Dropdown / Popover
+          border: 'rgba(255, 255, 255, 0.08)',       // Crisp structural divider
+          borderSubtle: 'rgba(255, 255, 255, 0.04)',
           borderStrong: 'rgba(255, 255, 255, 0.16)',
         },
         content: {
-          primary: '#f8fafc',     // High-emphasis white
-          secondary: '#94a3b8',   // Medium-emphasis slate
-          muted: '#64748b',       // Low-emphasis muted text
+          primary: '#f5f4ef',     // Warm Ivory - High contrast, soft on eyes
+          secondary: '#a1a1aa',   // Flint neutral gray
+          muted: '#71717a',       // Architectural stone gray
         },
-        navy: {
-          DEFAULT: '#020617',
-          light: '#0b1222',
+        ivory: {
+          DEFAULT: '#f5f4ef',
+          muted: '#d6d3cb',
+          soft: '#faf8f5',
         },
-        electric: '#38bdf8',
-        slate: '#94a3b8',
+        charcoal: {
+          DEFAULT: '#111215',
+          light: '#181a1f',
+          surface: '#20242c',
+        },
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'monospace'],
       },
       boxShadow: {
-        'card': '0 4px 20px -2px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05)',
-        'elevated': '0 12px 32px -4px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.08)',
-        'glow-brand': '0 0 25px -4px rgba(14, 165, 233, 0.3)',
+        'card': '0 4px 20px -2px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.04)',
+        'elevated': '0 12px 32px -4px rgba(0, 0, 0, 0.75), inset 0 1px 0 0 rgba(255, 255, 255, 0.06)',
+        'glow-brand': '0 0 20px -2px rgba(212, 242, 55, 0.22)',
       },
     },
   },

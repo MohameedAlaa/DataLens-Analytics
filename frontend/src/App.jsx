@@ -22,34 +22,18 @@ function SectionLoadingFallback({ title, height = 'h-36' }) {
   );
 }
 
-function CopilotLoadingFallback() {
-  return (
-    <aside
-      className="w-80 lg:w-96 border-l border-surface-border bg-surface-card/40
-                 items-center justify-center p-6 animate-pulse hidden lg:flex"
-      aria-busy="true"
-      aria-label="Loading AI Copilot"
-    >
-      <span className="body-xs text-content-muted">Loading AI Copilot...</span>
-    </aside>
-  );
-}
-
 export default function App() {
   const { datasetInfo } = useData();
   const [activeTab, setActiveTab] = useState('overview');
   const [externalPrompt, setExternalPrompt] = useState(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isMobileCopilotOpen, setIsMobileCopilotOpen] = useState(false);
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const isClickNavigating = useRef(false);
   const promptTimerRef = useRef(null);
 
   const handlePromptSelect = useCallback((promptText) => {
     setExternalPrompt(promptText);
-    // Auto-open Copilot on mobile if prompt selected from AI Insights
-    if (window.innerWidth < 1024) {
-      setIsMobileCopilotOpen(true);
-    }
+    setIsCopilotOpen(true);
     if (promptTimerRef.current) clearTimeout(promptTimerRef.current);
     promptTimerRef.current = setTimeout(() => setExternalPrompt(null), 150);
   }, []);
@@ -64,10 +48,10 @@ export default function App() {
   useEffect(() => {
     const main = document.querySelector('main');
     if (!main) return;
-    
+
     const handleScroll = () => {
       if (isClickNavigating.current) return;
-      
+
       // If at bottom
       if (Math.abs(main.scrollHeight - main.clientHeight - main.scrollTop) < 10) {
         setActiveTab('dataset');
@@ -77,7 +61,7 @@ export default function App() {
       const sections = ['overview', 'ai-insights', 'analytics', 'visualizations', 'dataset'];
       const mainRect = main.getBoundingClientRect();
       let current = sections[0];
-      
+
       for (const id of sections) {
         const el = document.getElementById(id);
         if (el) {
@@ -87,9 +71,9 @@ export default function App() {
           }
         }
       }
-      
+
       setActiveTab((prev) => {
-        if (prev === 'copilot') return prev; // Preserve copilot active state
+        if (prev === 'copilot') return prev; // Preserve copilot active state if explicitly opened
         return current;
       });
     };
@@ -98,19 +82,14 @@ export default function App() {
     return () => main.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Handle smooth scroll when a sidebar item is clicked
+  // Handle navigation click
   const handleNavClick = useCallback((id) => {
     setActiveTab(id);
     if (id === 'copilot') {
-      if (window.innerWidth < 1024) {
-        setIsMobileCopilotOpen(true);
-      } else {
-        const input = document.querySelector('aside form input');
-        if (input) input.focus();
-      }
+      setIsCopilotOpen(true);
       return;
     }
-    
+
     const el = document.getElementById(id);
     if (el) {
       isClickNavigating.current = true;
@@ -123,17 +102,18 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-surface-bg text-content-primary flex flex-col font-sans">
+    <div className="h-screen h-[100dvh] max-h-[100dvh] bg-surface-bg text-content-primary flex flex-col font-sans overflow-hidden">
       {/* Top Application Navbar */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={handleNavClick}
-        onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
-        onToggleMobileCopilot={() => setIsMobileCopilotOpen(prev => !prev)}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
+        onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
+        isCopilotOpen={isCopilotOpen}
       />
 
-      {/* 3-Column App Shell */}
-      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+      {/* Main Workspace Layout (Sidebar + Full Canvas + Floating Copilot) */}
+      <div className="flex flex-1 min-h-0 h-full overflow-hidden relative">
         {/* Left Sidebar (Desktop + Mobile Drawer) */}
         <Sidebar
           activeTab={activeTab}
@@ -142,9 +122,9 @@ export default function App() {
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
-        {/* Center Main Canvas */}
+        {/* Center Main Canvas - expands to full width */}
         <main
-          className="flex-1 min-w-0 overflow-y-auto custom-scrollbar
+          className="flex-1 min-w-0 h-full overflow-y-auto custom-scrollbar
                      px-4 py-5 md:px-6 lg:px-7 space-y-5"
         >
           {!datasetInfo ? (
@@ -168,13 +148,14 @@ export default function App() {
           )}
         </main>
 
-        {/* Right AI Copilot Panel (Desktop + Mobile Drawer) */}
+        {/* Floating AI Copilot Experience (Floating button + Floating chat modal) */}
         <ErrorBoundary title="AI Copilot">
-          <Suspense fallback={<CopilotLoadingFallback />}>
+          <Suspense fallback={null}>
             <Chatbot
+              isOpen={isCopilotOpen}
+              onToggle={() => setIsCopilotOpen((prev) => !prev)}
+              onClose={() => setIsCopilotOpen(false)}
               externalPrompt={externalPrompt}
-              isOpenMobile={isMobileCopilotOpen}
-              onCloseMobile={() => setIsMobileCopilotOpen(false)}
             />
           </Suspense>
         </ErrorBoundary>

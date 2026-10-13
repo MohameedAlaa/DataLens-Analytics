@@ -32,34 +32,34 @@ export default function DataLensLogo({ size = 'md', variant = 'full', className 
     >
       <defs>
         <linearGradient id="dlBgGrad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#0F172A" />
-          <stop offset="100%" stop-color="#020617" />
+          <stop offset="0%" stopColor="#181A1F" />
+          <stop offset="100%" stopColor="#111215" />
         </linearGradient>
         <linearGradient id="dlRimGrad" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#38BDF8" />
-          <stop offset="50%" stop-color="#0EA5E9" />
-          <stop offset="100%" stop-color="#6366F1" />
+          <stop offset="0%" stopColor="#D4F237" />
+          <stop offset="65%" stopColor="#A3C415" />
+          <stop offset="100%" stopColor="#E06D53" />
         </linearGradient>
         <linearGradient id="dlBar1" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#38BDF8" />
-          <stop offset="100%" stop-color="#0284C7" />
+          <stop offset="0%" stopColor="#FAF8F5" />
+          <stop offset="100%" stopColor="#D6D3CB" />
         </linearGradient>
         <linearGradient id="dlBar2" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#22D3EE" />
-          <stop offset="100%" stop-color="#0EA5E9" />
+          <stop offset="0%" stopColor="#D4F237" />
+          <stop offset="100%" stopColor="#92B80F" />
         </linearGradient>
         <linearGradient id="dlBar3" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#A5B4FC" />
-          <stop offset="100%" stop-color="#6366F1" />
+          <stop offset="0%" stopColor="#EA826B" />
+          <stop offset="100%" stopColor="#C8573D" />
         </linearGradient>
         <filter id="dlGlow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0EA5E9" flood-opacity="0.35" />
+          <feDropShadow dx="0" dy="1" stdDeviation="2.5" floodColor="#D4F237" floodOpacity="0.25" />
         </filter>
       </defs>
 
       {/* Outer Squircle Container */}
       <rect width="48" height="48" rx="12" fill="url(#dlBgGrad)" />
-      <rect width="48" height="48" rx="12" stroke="rgba(255, 255, 255, 0.12)" stroke-width="1.2" />
+      <rect width="48" height="48" rx="12" stroke="rgba(255, 255, 255, 0.1)" strokeWidth="1.2" />
 
       {/* Optical Focusing Ring */}
       <circle
@@ -67,9 +67,9 @@ export default function DataLensLogo({ size = 'md', variant = 'full', className 
         cy="24"
         r="16.5"
         stroke="url(#dlRimGrad)"
-        stroke-width="2.5"
-        stroke-linecap="round"
-        stroke-dasharray="82 22"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeDasharray="82 22"
         filter="url(#dlGlow)"
       />
 
@@ -78,9 +78,9 @@ export default function DataLensLogo({ size = 'md', variant = 'full', className 
         cx="24"
         cy="24"
         r="11.5"
-        stroke="rgba(148, 163, 184, 0.4)"
-        stroke-width="1"
-        stroke-dasharray="2 3"
+        stroke="rgba(161, 161, 170, 0.3)"
+        strokeWidth="1"
+        strokeDasharray="2 3"
       />
 
       {/* Data Prism Bars (Refracted through the lens) */}
@@ -89,7 +89,7 @@ export default function DataLensLogo({ size = 'md', variant = 'full', className 
       <rect x="28.5" y="20" width="3.5" height="14" rx="1.75" fill="url(#dlBar3)" />
 
       {/* Optical Focal Dot */}
-      <circle cx="24" cy="11.5" r="1.5" fill="#38BDF8" />
+      <circle cx="24" cy="11.5" r="1.5" fill="#D4F237" />
     </svg>
   );
 
@@ -103,13 +103,13 @@ export default function DataLensLogo({ size = 'md', variant = 'full', className 
       <div className="flex flex-col leading-none">
         <div className="flex items-center tracking-tight">
           <span className={`font-semibold text-content-primary ${config.text}`}>Data</span>
-          <span className={`font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-accent-400 ${config.text}`}>
+          <span className={`font-extrabold text-brand-400 ${config.text}`}>
             Lens
           </span>
-          <span className="inline-block w-1 h-1 rounded-full bg-brand-400 ml-0.5 mb-1 animate-pulse" />
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400 ml-1 mb-0.5" />
         </div>
         <span className={`font-mono uppercase font-semibold text-content-muted tracking-[0.2em] ${config.sub} mt-0.5`}>
-          Analytics AI
+          Analytics
         </span>
       </div>
     </div>

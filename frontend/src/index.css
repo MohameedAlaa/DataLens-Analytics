@@ -14,18 +14,18 @@ html {
 }
 
 html, body, #root {
+  height: 100%;
   min-height: 100%;
-  background-color: #020617;
+  background-color: #111215;
 }
 
 body {
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-feature-settings: 'cv02','cv03','cv04','cv11';
-  background: radial-gradient(circle at 50% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 45%),
-              radial-gradient(circle at 85% 15%, rgba(99, 102, 241, 0.06) 0%, transparent 40%),
-              radial-gradient(circle at 15% 35%, rgba(6, 182, 212, 0.04) 0%, transparent 35%),
-              #020617;
-  color: #f8fafc;
+  background: radial-gradient(circle at 50% 0%, rgba(212, 242, 55, 0.03) 0%, transparent 45%),
+              radial-gradient(circle at 85% 15%, rgba(224, 109, 83, 0.02) 0%, transparent 40%),
+              #111215;
+  color: #f5f4ef;
 }
 
 * {
@@ -63,16 +63,16 @@ body {
 
   /* Buttons */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white
-           bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400
-           border border-brand-400/30 shadow-sm shadow-brand-500/20 active:scale-[0.98]
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-[#111215]
+           bg-brand-400 hover:bg-brand-500
+           border border-brand-300/40 shadow-sm shadow-brand-400/20 active:scale-[0.98]
            focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:outline-none
            disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none transition-all duration-150;
   }
 
   .btn-secondary {
     @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium text-content-secondary
-           bg-surface-elevated/70 hover:bg-surface-elevated hover:text-content-primary
+           bg-surface-elevated/80 hover:bg-surface-elevated hover:text-content-primary
            border border-surface-border hover:border-surface-borderStrong active:scale-[0.98]
            focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:outline-none
            disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150;
@@ -87,6 +87,25 @@ body {
   /* Tabular Numerals for metrics */
   .stat-number {
     @apply font-mono tabular-nums tracking-tight font-bold text-content-primary;
+  }
+
+  /* Interactive Elements */
+  .interactive-button {
+    @apply transition-all duration-150 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400;
+  }
+
+  /* Accordion Grid Animation Utilities */
+  .accordion-grid {
+    display: grid;
+    transition: grid-template-rows 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out;
+  }
+  .accordion-open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .accordion-closed {
+    grid-template-rows: 0fr;
+    opacity: 0;
   }
 }
 
@@ -125,14 +144,14 @@ body {
 
 /* ── Focus Rings & Accessibility ────────────────────────────────────── */
 *:focus-visible {
-  outline: 2px solid rgba(14, 165, 233, 0.7);
+  outline: 2px solid rgba(212, 242, 55, 0.75);
   outline-offset: 2px;
 }
 
 /* ── Text Selection ─────────────────────────────────────────────────── */
 ::selection {
-  background: rgba(14, 165, 233, 0.28);
-  color: #f8fafc;
+  background: rgba(212, 242, 55, 0.25);
+  color: #f5f4ef;
 }
 
 /* ── Smooth Interactive Cards ───────────────────────────────────────── */
