@@ -66,10 +66,10 @@ export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false,
                       px-2.5 py-2 rounded-lg body-xs font-medium
                       transition-all duration-100
                       ${isActive
-                        ? 'bg-brand-500/12 text-brand-400 border border-brand-500/25'
+                        ? 'bg-brand-500/15 text-brand-300 border border-brand-500/30 font-semibold shadow-sm'
                         : item.disabled
                         ? 'text-content-muted opacity-40 cursor-not-allowed'
-                        : 'text-content-secondary hover:bg-surface-elevated hover:text-content-primary'
+                        : 'text-content-secondary hover:bg-surface-elevated/70 hover:text-content-primary'
                       }
                     `}
                   >
@@ -78,7 +78,7 @@ export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false,
                       <span className="truncate">{item.label}</span>
                     </span>
                     {item.badge && (
-                      <span className="ml-1 shrink-0 px-1.5 py-px text-[9px] font-extrabold
+                      <span className="ml-1 shrink-0 px-1.5 py-px text-[9px] font-mono font-bold
                                        bg-brand-500 text-white rounded tracking-wide">
                         {item.badge}
                       </span>
@@ -101,8 +101,8 @@ export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false,
           <button
             onClick={() => setFiltersOpen(!filtersOpen)}
             className="w-full flex items-center justify-between
-                       px-2.5 py-2 rounded-lg body-xs font-semibold text-content-primary
-                       hover:bg-surface-elevated transition-colors"
+                       px-2.5 py-2 rounded-xl text-xs font-semibold text-content-primary
+                       hover:bg-surface-elevated/70 transition-colors"
           >
             <span className="flex items-center gap-2.5">
               <Filter className="w-3.5 h-3.5 text-brand-400 shrink-0" />
@@ -128,7 +128,7 @@ export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false,
       {/* Desktop Sidebar */}
       <aside
         className="hidden md:flex w-60 lg:w-64 shrink-0 flex-col
-                   border-r border-surface-border bg-surface-card
+                   border-r border-surface-border bg-surface-card/60 backdrop-blur-sm
                    h-[calc(100vh-4rem)] sticky top-16 overflow-hidden"
       >
         {sidebarContent}

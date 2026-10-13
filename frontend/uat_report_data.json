@@ -1,0 +1,169 @@
+{
+  "report": {
+    "test1_initialLoad": {
+      "status": 200,
+      "navigationTimeMs": 1102,
+      "title": "DataLens Analytics",
+      "isBlank": false,
+      "consoleErrors": [],
+      "consoleWarnings": []
+    },
+    "test2_responsive": {
+      "desktop_1440": {
+        "hasHorizontalOverflow": false,
+        "scrollWidth": 1440,
+        "clientWidth": 1440
+      },
+      "tablet_768": {
+        "hasHorizontalOverflow": false,
+        "scrollWidth": 768,
+        "clientWidth": 768
+      },
+      "mobile_390": {
+        "hasHorizontalOverflow": false,
+        "scrollWidth": 390,
+        "clientWidth": 390
+      },
+      "mobile_360": {
+        "hasHorizontalOverflow": false,
+        "scrollWidth": 360,
+        "clientWidth": 360
+      }
+    },
+    "test3_upload": {
+      "durationMs": 118,
+      "uploadStatus": 405,
+      "uploadUrl": "https://data-lens-analytics.vercel.app/api/upload",
+      "uploadBodySnippet": "",
+      "datasetPillFound": false,
+      "alerts": []
+    },
+    "test4_analytics": {
+      "statCardsFound": 0,
+      "statCardsSnippet": []
+    },
+    "test5_filtering": {},
+    "test6_aiCopilot": {
+      "chatExists": true,
+      "isChatDisabled": true
+    },
+    "test7_rag": {},
+    "test8_isolation": {},
+    "test9_invalidInput": {
+      "emptyAlerts": [],
+      "unsupportedAlerts": []
+    },
+    "test10_connectivity": {
+      "apiRequests": [
+        {
+          "url": "https://data-lens-analytics.vercel.app/api/upload",
+          "method": "POST",
+          "resourceType": "xhr"
+        },
+        {
+          "url": "https://data-lens-analytics.vercel.app/api/upload",
+          "method": "POST",
+          "resourceType": "xhr"
+        },
+        {
+          "url": "https://data-lens-analytics.vercel.app/api/upload",
+          "method": "POST",
+          "resourceType": "xhr"
+        }
+      ],
+      "networkFailures": []
+    },
+    "test12_performance": {},
+    "test13_security": {
+      "hasGeminiKeyInSource": false,
+      "hasSecretWordInSource": false,
+      "httpsUsed": true
+    }
+  },
+  "consoleLogs": [
+    {
+      "type": "warning",
+      "text": "[DataLens] VITE_API_BASE_URL is not configured in this production build. Requests will route to relative \"/api\". Ensure requests reach the persistent FastAPI backend rather than serverless adapters."
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 405 ()"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 405 ()"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 405 ()"
+    }
+  ],
+  "networkRequests": [
+    {
+      "url": "https://data-lens-analytics.vercel.app/",
+      "method": "GET",
+      "resourceType": "document"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/index-CMYMynbc.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/vendor-react-c6vpYEMA.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/vendor-icons-AnSEqm-q.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/index-B_JnJZxM.css",
+      "method": "GET",
+      "resourceType": "stylesheet"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/AIInsightsSection-Df4HsIv4.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/Dashboard-VDFp1Bos.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/vendor-charts-Ddcf9vfY.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/Chatbot-rofZE972.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/assets/vendor-markdown-BnO8lLWC.js",
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/api/upload",
+      "method": "POST",
+      "resourceType": "xhr"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/api/upload",
+      "method": "POST",
+      "resourceType": "xhr"
+    },
+    {
+      "url": "https://data-lens-analytics.vercel.app/api/upload",
+      "method": "POST",
+      "resourceType": "xhr"
+    }
+  ],
+  "networkFailures": []
+}

@@ -45,9 +45,19 @@ _load_dotenv(Path(__file__).resolve().parent / ".env")
 # ---------------------------------------------------------------------------
 
 def _env_list(key: str, default: str) -> List[str]:
-    """Read a comma-separated environment variable into a list of strings."""
+    """Read a comma-separated environment variable into a list of strings, stripping quotes and trailing slashes."""
     raw = os.getenv(key, default)
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    origins: List[str] = []
+    for item in raw.split(","):
+        cleaned = item.strip().strip('"').strip("'")
+        if not cleaned:
+            continue
+        no_slash = cleaned.rstrip("/")
+        if no_slash and no_slash not in origins:
+            origins.append(no_slash)
+        if cleaned != no_slash and cleaned not in origins:
+            origins.append(cleaned)
+    return origins
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
 import axios from 'axios';
-import { extractErrorMessage } from '../../utils/apiClient';
+import { apiClient, extractErrorMessage } from '../../utils/apiClient';
 import {
   Sparkles, TrendingUp, AlertTriangle, Lightbulb, Activity, ArrowRight,
   ShieldCheck, CheckCircle2, AlertCircle, XCircle, Database, Hash, Type,
@@ -235,7 +235,7 @@ export default function AIInsightsSection({ onPromptSelect }) {
       setLoading(true);
       setError(null);
       try {
-        const resp = await axios.get(`/api/stats/${datasetId}`, {
+        const resp = await apiClient.get(`/stats/${datasetId}`, {
           signal: abortController.signal,
         });
         if (!cancelled) {
@@ -394,21 +394,21 @@ export default function AIInsightsSection({ onPromptSelect }) {
 
   // ── Section toggle header ──────────────────────────────────────────────
   const SectionToggle = ({ id, title, icon: Icon, badge, children }) => (
-    <div className="rounded-2xl border border-surface-border bg-surface-card overflow-hidden shadow-sm">
+    <div className="rounded-2xl border border-surface-border bg-surface-card/90 overflow-hidden shadow-card hover:border-surface-borderStrong transition-all duration-150">
       <button
         onClick={() => toggleSection(id)}
-        className="w-full flex items-center justify-between p-5 hover:bg-surface-elevated/30 transition-colors"
+        className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-surface-elevated/40 transition-colors"
       >
         <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-surface-elevated border border-surface-border">
-            <Icon className="w-4 h-4 text-content-secondary" />
+          <div className="p-1.5 rounded-lg bg-surface-elevated border border-surface-border text-brand-400">
+            <Icon className="w-4 h-4" />
           </div>
-          <span className="text-xs font-bold text-content-primary uppercase tracking-wide">{title}</span>
-          {badge && <span className="px-2 py-0.5 text-[10px] font-bold bg-brand-500/10 text-brand-400 rounded-full border border-brand-500/20">{badge}</span>}
+          <span className="text-xs font-bold text-content-primary tracking-tight uppercase">{title}</span>
+          {badge && <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-brand-500/10 text-brand-400 rounded-md border border-brand-500/20">{badge}</span>}
         </div>
         {expandedSections[id] ? <ChevronUp className="w-4 h-4 text-content-muted" /> : <ChevronDown className="w-4 h-4 text-content-muted" />}
       </button>
-      {expandedSections[id] && <div className="px-5 pb-5">{children}</div>}
+      {expandedSections[id] && <div className="px-4 sm:px-5 pb-5">{children}</div>}
     </div>
   );
 

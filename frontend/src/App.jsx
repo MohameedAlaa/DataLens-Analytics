@@ -2,6 +2,8 @@ import React, { useState, useCallback, useEffect, useRef, lazy, Suspense } from 
 import Navbar from './components/Navigation/Navbar';
 import Sidebar from './components/Navigation/Sidebar';
 import ErrorBoundary from './components/ErrorBoundary';
+import WorkspaceHero from './components/Upload/WorkspaceHero';
+import { useData } from './context/DataContext';
 
 const AIInsightsSection = lazy(() => import('./components/Insights/AIInsightsSection'));
 const Dashboard = lazy(() => import('./components/Dashboard/Dashboard'));
@@ -34,6 +36,7 @@ function CopilotLoadingFallback() {
 }
 
 export default function App() {
+  const { datasetInfo } = useData();
   const [activeTab, setActiveTab] = useState('overview');
   const [externalPrompt, setExternalPrompt] = useState(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -144,19 +147,25 @@ export default function App() {
           className="flex-1 min-w-0 overflow-y-auto custom-scrollbar
                      px-4 py-5 md:px-6 lg:px-7 space-y-5"
         >
-          <div id="overview" className="h-0 w-full" />
-          <div id="ai-insights">
-            <ErrorBoundary title="AI Insights Section">
-              <Suspense fallback={<SectionLoadingFallback title="AI Insights" height="h-28" />}>
-                <AIInsightsSection onPromptSelect={handlePromptSelect} />
-              </Suspense>
-            </ErrorBoundary>
-          </div>
-          <ErrorBoundary title="Analytics Dashboard">
-            <Suspense fallback={<SectionLoadingFallback title="Dashboard" height="h-64" />}>
-              <Dashboard />
-            </Suspense>
-          </ErrorBoundary>
+          {!datasetInfo ? (
+            <WorkspaceHero />
+          ) : (
+            <>
+              <div id="overview" className="h-0 w-full" />
+              <div id="ai-insights">
+                <ErrorBoundary title="AI Insights Section">
+                  <Suspense fallback={<SectionLoadingFallback title="AI Insights" height="h-28" />}>
+                    <AIInsightsSection onPromptSelect={handlePromptSelect} />
+                  </Suspense>
+                </ErrorBoundary>
+              </div>
+              <ErrorBoundary title="Analytics Dashboard">
+                <Suspense fallback={<SectionLoadingFallback title="Dashboard" height="h-64" />}>
+                  <Dashboard />
+                </Suspense>
+              </ErrorBoundary>
+            </>
+          )}
         </main>
 
         {/* Right AI Copilot Panel (Desktop + Mobile Drawer) */}

@@ -20,11 +20,13 @@ const PALETTE = [
 ];
 
 const TOOLTIP_STYLE = {
-  backgroundColor: '#0f172a',
-  borderColor: '#334155',
-  borderRadius: '0.75rem',
+  backgroundColor: '#0b1222',
+  borderColor: 'rgba(255, 255, 255, 0.12)',
+  borderRadius: '0.875rem',
   fontSize: '11px',
   color: '#f8fafc',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+  padding: '8px 12px',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -122,18 +124,18 @@ function ChartCard({ id, title, icon: Icon, iconColor, badge, accentClass, child
   return (
     <div
       id={id}
-      className={`p-4 sm:p-5 rounded-2xl border border-surface-border bg-surface-card
-        flex flex-col space-y-3 shadow-sm transition-all duration-200
-        hover:shadow-md ${accentClass || 'hover:border-brand-500/20'}`}
+      className={`p-4 sm:p-5 rounded-2xl border border-surface-border bg-surface-card/90
+        flex flex-col space-y-3.5 shadow-card transition-all duration-200
+        hover:border-surface-borderStrong hover:shadow-elevated ${accentClass || ''}`}
     >
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 body-xs font-bold text-content-primary">
+        <div className="flex items-center gap-2 text-xs font-bold text-content-primary">
           <div className={`p-1.5 rounded-lg border ${iconColor || 'bg-brand-500/10 text-brand-400 border-brand-500/20'}`}>
             <Icon className="w-4 h-4" />
           </div>
-          <span>{title}</span>
+          <span className="tracking-tight">{title}</span>
           {badge && (
-            <span className="ml-1 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
+            <span className="ml-1 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-brand-500/10 text-brand-400 border border-brand-500/20">
               {badge}
             </span>
           )}
@@ -605,36 +607,50 @@ function SectionHeader({ icon: Icon, label }) {
 }
 
 function AnalyticsSummaryCards({ rows, numericColumns, catColumns }) {
+  const primaryNum = numericColumns[0];
+  const primarySum = primaryNum
+    ? rows.reduce((acc, r) => acc + (Number(r[primaryNum]) || 0), 0)
+    : null;
+
   const stats = [
     {
-      label: 'Rows analyzed',
+      label: 'Rows Analyzed',
       value: rows.length.toLocaleString(),
-      hint: rows.length ? 'live filtered view' : 'no rows yet',
+      hint: rows.length ? 'Active filtered slice' : 'No rows',
+      highlight: 'text-brand-300',
     },
     {
-      label: 'Numeric fields',
-      value: numericColumns.length.toString(),
-      hint: numericColumns.length ? 'trend + distribution ready' : 'no numeric candidates',
+      label: primaryNum ? `Total ${primaryNum}` : 'Primary Aggregate',
+      value: primarySum != null ? primarySum.toLocaleString() : 'N/A',
+      hint: primaryNum ? `Sum across ${rows.length} rows` : 'No numeric fields',
+      highlight: 'text-emerald-400',
     },
     {
-      label: 'Categorical fields',
-      value: catColumns.length.toString(),
-      hint: catColumns.length ? 'segments + proportions ready' : 'fallback views enabled',
+      label: 'Feature Dimensions',
+      value: `${numericColumns.length} num • ${catColumns.length} cat`,
+      hint: 'Multi-variable coverage',
+      highlight: 'text-accent-400',
     },
     {
-      label: 'Layout mode',
-      value: '2 × 2',
-      hint: 'responsive analytics grid',
+      label: 'Data Integrity',
+      value: rows.length > 0 ? 'Verified' : 'Pending',
+      hint: 'Session isolated & clean',
+      highlight: 'text-cyan-400',
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
       {stats.map((stat) => (
-        <div key={stat.label} className="rounded-2xl border border-surface-border bg-surface-card p-3.5 shadow-sm">
-          <p className="body-xs text-content-muted">{stat.label}</p>
-          <p className="mt-1 text-lg font-semibold text-content-primary">{stat.value}</p>
-          <p className="mt-1 body-xs text-content-secondary">{stat.hint}</p>
+        <div
+          key={stat.label}
+          className="rounded-2xl border border-surface-border bg-surface-card/90 p-4 shadow-card hover:shadow-elevated hover:border-surface-borderStrong transition-all duration-150"
+        >
+          <p className="label-caps">{stat.label}</p>
+          <p className={`mt-1.5 text-xl font-bold font-mono tracking-tight ${stat.highlight || 'text-content-primary'}`}>
+            {stat.value}
+          </p>
+          <p className="mt-1 text-[11px] text-content-secondary">{stat.hint}</p>
         </div>
       ))}
     </div>

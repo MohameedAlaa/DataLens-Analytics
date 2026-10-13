@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { useData } from '../context/DataContext';
-import { extractErrorMessage } from '../utils/apiClient';
+import { apiClient, extractErrorMessage } from '../utils/apiClient';
 
 // Hook to handle chat messages with the backend LLM endpoint
 export const useChat = () => {
@@ -85,8 +85,8 @@ export const useChat = () => {
           .slice(-10)
           .map((m) => ({ role: m.role, content: m.content }));
 
-        const resp = await axios.post(
-          '/api/chat',
+        const resp = await apiClient.post(
+          '/chat',
           {
             question: trimmedQuestion,
             dataset_id: requestDatasetId,

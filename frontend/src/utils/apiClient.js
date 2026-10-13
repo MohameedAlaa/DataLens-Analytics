@@ -94,7 +94,7 @@ const getApiBaseUrl = () => {
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       if (import.meta.env.VITE_API_BASE_URL) {
-        return import.meta.env.VITE_API_BASE_URL;
+        return import.meta.env.VITE_API_BASE_URL.trim().replace(/\/+$/, '');
       }
       if (import.meta.env.PROD && typeof window !== 'undefined') {
         console.warn(

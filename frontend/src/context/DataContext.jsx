@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
-import { extractErrorMessage } from '../utils/apiClient';
+import { apiClient, extractErrorMessage } from '../utils/apiClient';
 
 // Create Context
 const DataContext = createContext(null);
@@ -44,7 +44,7 @@ export const DataProvider = ({ children }) => {
       const form = new FormData();
       form.append('file', file);
       // Let the browser set the Content-Type (and boundary) automatically.
-      const resp = await axios.post('/api/upload', form);
+      const resp = await apiClient.post('/upload', form);
       const info = resp.data || {};
       const normalizedInfo = {
         ...info,
@@ -86,8 +86,8 @@ export const DataProvider = ({ children }) => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await axios.post(
-        '/api/filter',
+      const resp = await apiClient.post(
+        '/filter',
         {
           dataset_id: datasetInfo.dataset_id,
           filters: newFilters,

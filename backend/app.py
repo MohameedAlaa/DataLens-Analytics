@@ -138,6 +138,7 @@ def _exempt(fn):
 # ---------------------------------------------------------------------------
 
 @app.post("/upload")
+@app.post("/api/upload")
 @_rate_limited(settings.rate_limit_upload)
 async def upload_file(
     request: Request,
@@ -267,6 +268,7 @@ class FilterRequest(BaseModel):
 
 
 @app.post("/filter")
+@app.post("/api/filter")
 @_rate_limited(settings.rate_limit_filter)
 async def filter_data(
     request: Request, 
@@ -315,6 +317,7 @@ async def filter_data(
 # ---------------------------------------------------------------------------
 
 @app.get("/stats/{dataset_id}")
+@app.get("/api/stats/{dataset_id}")
 @_rate_limited(settings.rate_limit_default)
 async def get_stats(
     request: Request, 
@@ -411,6 +414,7 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
+@app.post("/api/chat")
 @_rate_limited(settings.rate_limit_chat)
 async def chat(
     request: Request, 
@@ -504,6 +508,7 @@ async def chat(
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
+@app.get("/api/health")
 @_exempt
 async def health(dataset_manager: DatasetManager = Depends(get_dataset_manager)) -> Dict[str, Any]:
     """Lightweight liveness probe — does not check external dependencies."""
