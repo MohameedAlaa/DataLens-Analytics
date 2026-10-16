@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 import logging
 from typing import Any, Dict, List
 import os
+import threading
 
 try:
     import chromadb
@@ -72,6 +73,7 @@ class ChromaVectorStore(BaseVectorStore):
         # Ensure directory exists
         os.makedirs(persist_directory, exist_ok=True)
         
+        self._lock = threading.Lock()
         self.client = chromadb.PersistentClient(path=persist_directory)
         self.collection = self.client.get_or_create_collection(name=collection_name)
         logger.info("ChromaVectorStore initialized at '%s' with collection '%s'", persist_directory, collection_name)
@@ -99,31 +101,59 @@ class ChromaVectorStore(BaseVectorStore):
                     clean_meta[k] = str(v)
             metadatas.append(clean_meta)
 
-        try:
-            self.collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas
-            )
-        except Exception as e:
-            if "dimension" in str(e).lower():
-                logger.warning(
-                    "Dimension mismatch in ChromaDB collection '%s' (%s). Resetting collection for new dimensions...",
-                    self.collection.name,
-                    e,
-                )
-                self.client.delete_collection(self.collection.name)
-                self.collection = self.client.get_or_create_collection(name=self.collection.name)
+        with self._lock:
+            try:
                 self.collection.upsert(
                     ids=ids,
                     embeddings=embeddings,
                     documents=documents,
                     metadatas=metadatas
                 )
-            else:
-                raise
-        logger.info("Inserted %d chunks into ChromaDB.", len(chunks))
+            except Exception as e:
+                if "dimension" in str(e).lower():
+                    try:
+                        existing_count = self.collection.count()
+                    except Exception as count_err:
+                        logger.error(
+                            "Dimension mismatch in ChromaDB collection '%s' (%s), but failed to verify collection count: %s. "
+                            "Refusing destructive recovery.",
+                            self.collection.name,
+                            e,
+                            count_err,
+                        )
+                        raise ValueError(
+                            f"Embedding dimension mismatch in collection '{self.collection.name}', but collection count "
+                            f"could not be verified ({count_err}). Destructive recovery was refused to prevent data loss."
+                        ) from count_err
+
+                    if existing_count == 0:
+                        logger.info(
+                            "Dimension mismatch on empty ChromaDB collection '%s'. Resetting collection for new dimensions...",
+                            self.collection.name,
+                        )
+                        self.client.delete_collection(self.collection.name)
+                        self.collection = self.client.get_or_create_collection(name=self.collection.name)
+                        self.collection.upsert(
+                            ids=ids,
+                            embeddings=embeddings,
+                            documents=documents,
+                            metadatas=metadatas
+                        )
+                    else:
+                        logger.error(
+                            "Dimension mismatch in ChromaDB collection '%s' (%s). "
+                            "Collection contains %d existing vectors; refusing to wipe collection.",
+                            self.collection.name,
+                            e,
+                            existing_count,
+                        )
+                        raise ValueError(
+                            f"Embedding dimension mismatch: cannot insert chunks into collection '{self.collection.name}' "
+                            f"which already contains {existing_count} vectors of a different dimensionality. ({e})"
+                        ) from e
+                else:
+                    raise
+            logger.info("Inserted %d chunks into ChromaDB.", len(chunks))
 
     def search(
         self, query_embedding: List[float], dataset_id: str, top_k: int = 5
@@ -156,13 +186,14 @@ class ChromaVectorStore(BaseVectorStore):
         return matches
 
     def delete_dataset(self, dataset_id: str) -> bool:
-        try:
-            self.collection.delete(where={"dataset_id": dataset_id})
-            logger.info("Deleted chunks for dataset_id '%s' from ChromaDB.", dataset_id)
-            return True
-        except Exception as e:
-            logger.error("Failed to delete dataset_id '%s' from ChromaDB: %s", dataset_id, e)
-            return False
+        with self._lock:
+            try:
+                self.collection.delete(where={"dataset_id": dataset_id})
+                logger.info("Deleted chunks for dataset_id '%s' from ChromaDB.", dataset_id)
+                return True
+            except Exception as e:
+                logger.error("Failed to delete dataset_id '%s' from ChromaDB: %s", dataset_id, e)
+                return False
 
     def count_vectors(self, dataset_id: str) -> int:
         try:
