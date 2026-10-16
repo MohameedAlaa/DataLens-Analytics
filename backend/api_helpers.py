@@ -68,8 +68,15 @@ SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xls")
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Categorize dataframe columns into numeric, categorical, and date groups."""
     numeric = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    categorical = [str(c) for c in df.columns if pd.api.types.is_object_dtype(df[c])]
     date = [str(c) for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    categorical = [
+        str(c) for c in df.columns
+        if str(c) not in numeric and str(c) not in date and (
+            pd.api.types.is_object_dtype(df[c])
+            or pd.api.types.is_string_dtype(df[c])
+            or pd.api.types.is_categorical_dtype(df[c])
+        )
+    ]
     return {
         "numeric_columns": numeric,
         "categorical_columns": categorical,
@@ -79,8 +86,9 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
 
 def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
     """Calculate numerical statistics, categorical summaries, and correlation matrix."""
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    categorical_cols = [c for c in df.columns if pd.api.types.is_object_dtype(df[c])]
+    types = classify_columns(df)
+    numeric_cols = types["numeric_columns"]
+    categorical_cols = types["categorical_columns"]
 
     numeric_summary = {}
     if numeric_cols:
@@ -117,6 +125,51 @@ def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
         "categorical_summary": categorical_summary,
         "correlation_matrix": corr_matrix,
     }
+
+
+def compute_filter_options(df: pd.DataFrame, max_categories: int = 50) -> Dict[str, Any]:
+    """Derive dataset-wide numeric bounds, categorical options, and date ranges
+    from the full DataFrame for frontend filter controls.
+    """
+    types = classify_columns(df)
+    filter_opts: Dict[str, Any] = {}
+
+    for col in types["numeric_columns"]:
+        s = df[col].dropna()
+        if not s.empty:
+            min_v = s.min()
+            max_v = s.max()
+            if pd.notna(min_v) and pd.notna(max_v) and not np.isinf(min_v) and not np.isinf(max_v):
+                min_clean = int(min_v) if isinstance(min_v, (int, np.integer)) else float(min_v)
+                max_clean = int(max_v) if isinstance(max_v, (int, np.integer)) else float(max_v)
+                filter_opts[str(col)] = {"bounds": [min_clean, max_clean]}
+            else:
+                filter_opts[str(col)] = {"bounds": None}
+        else:
+            filter_opts[str(col)] = {"bounds": None}
+
+    for col in types["categorical_columns"]:
+        s = df[col].dropna()
+        if not s.empty:
+            counts = s.value_counts().head(max_categories)
+            top_vals = [
+                {"value": str(k), "count": int(v)}
+                for k, v in counts.items()
+            ]
+            filter_opts[str(col)] = {"top_values": top_vals}
+        else:
+            filter_opts[str(col)] = {"top_values": []}
+
+    for col in types["date_columns"]:
+        s = df[col].dropna()
+        if not s.empty:
+            min_d = str(s.min())
+            max_d = str(s.max())
+            filter_opts[str(col)] = {"bounds": [min_d, max_d]}
+        else:
+            filter_opts[str(col)] = {"bounds": None}
+
+    return filter_opts
 
 
 def generate_local_answer(question: str, df: pd.DataFrame) -> str:
@@ -258,6 +311,7 @@ def parse_dataset_bytes(
 
     preview = preview_df.to_dict(orient="records")
     types = classify_columns(df)
+    filter_options = compute_filter_options(df)
     dataset_id = str(uuid.uuid4())
 
     return {
@@ -267,6 +321,7 @@ def parse_dataset_bytes(
         "dtypes": dtypes,
         "shape": list(df.shape),
         "preview": preview,
+        "filter_options": filter_options,
         **types,
     }
 

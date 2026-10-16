@@ -13,6 +13,7 @@ function normalizeDatasetInfo(info) {
     categorical_columns: Array.isArray(data.categorical_columns) ? data.categorical_columns : [],
     date_columns: Array.isArray(data.date_columns) ? data.date_columns : [],
     preview: Array.isArray(data.preview) ? data.preview : [],
+    filter_options: (data.filter_options && typeof data.filter_options === 'object') ? data.filter_options : {},
   };
 }
 
@@ -24,6 +25,7 @@ test('dataLifecycle: normalizeDatasetInfo handles sparse/partial backend respons
   assert.deepEqual(normalized.numeric_columns, []);
   assert.deepEqual(normalized.categorical_columns, []);
   assert.deepEqual(normalized.preview, []);
+  assert.deepEqual(normalized.filter_options, {});
 });
 
 test('dataLifecycle: request sequence token prevents out-of-order filter overwrites', async () => {

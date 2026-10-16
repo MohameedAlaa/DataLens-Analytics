@@ -38,14 +38,30 @@ export default function Filters() {
 
   // ── Numeric Bounds Helper ─────────────────────────────────────────────────
   const getNumericBounds = useCallback((col) => {
+    const backendBounds = datasetInfo?.filter_options?.[col]?.bounds;
+    if (
+      Array.isArray(backendBounds) &&
+      backendBounds.length === 2 &&
+      backendBounds[0] !== null &&
+      backendBounds[1] !== null &&
+      !Number.isNaN(Number(backendBounds[0])) &&
+      !Number.isNaN(Number(backendBounds[1]))
+    ) {
+      return [Number(backendBounds[0]), Number(backendBounds[1])];
+    }
     const vals = rawData.map((r) => Number(r[col])).filter((v) => !Number.isNaN(v));
     return vals.length ? [Math.min(...vals), Math.max(...vals)] : null;
-  }, [rawData]);
+  }, [datasetInfo, rawData]);
 
   // ── Categorical Top Values Cache ──────────────────────────────────────────
   const topValuesCache = useRef({});
   const topValues = useCallback((col) => {
     if (topValuesCache.current[col]) return topValuesCache.current[col];
+    const backendOptions = datasetInfo?.filter_options?.[col]?.top_values;
+    if (Array.isArray(backendOptions) && backendOptions.length > 0) {
+      topValuesCache.current[col] = backendOptions;
+      return backendOptions;
+    }
     const counts = {};
     const src = rawData.length ? rawData : filteredData;
     src.forEach((row) => {
@@ -58,11 +74,11 @@ export default function Filters() {
       .map(([k, cnt]) => ({ value: k, count: cnt }));
     topValuesCache.current[col] = result;
     return result;
-  }, [rawData, filteredData]);
+  }, [datasetInfo, rawData, filteredData]);
 
   useEffect(() => {
     topValuesCache.current = {};
-  }, [rawData, filteredData]);
+  }, [datasetInfo, rawData, filteredData]);
 
   // ── Initialise localFilters helper ──────────────────────────────────────
   const getInitialFilters = useCallback(() => {

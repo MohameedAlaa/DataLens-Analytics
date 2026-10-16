@@ -56,6 +56,7 @@ export const DataProvider = ({ children }) => {
         categorical_columns: Array.isArray(info.categorical_columns) ? info.categorical_columns : [],
         date_columns: Array.isArray(info.date_columns) ? info.date_columns : [],
         preview: Array.isArray(info.preview) ? info.preview : [],
+        filter_options: (info.filter_options && typeof info.filter_options === 'object') ? info.filter_options : {},
       };
 
       // Reset filters and establish new dataset state atomically
