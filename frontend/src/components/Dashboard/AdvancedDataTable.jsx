@@ -158,7 +158,7 @@ export default function AdvancedDataTable() {
               placeholder="Search table rows..."
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
-              className="w-full pl-8 pr-3 py-1.5 bg-surface-elevated border border-surface-border rounded-xl body-xs text-content-primary placeholder:text-content-muted focus:outline-none focus:border-brand-500"
+              className="w-full pl-8 pr-3 py-1.5 bg-surface-elevated border border-surface-border rounded-xl body-xs text-content-primary placeholder:text-content-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus:border-brand-500"
             />
           </div>
           <span className="body-xs text-content-secondary shrink-0 font-medium">
@@ -173,7 +173,7 @@ export default function AdvancedDataTable() {
             <button
               onClick={() => setShowColMenu(!showColMenu)}
               aria-label="Toggle column visibility menu"
-              className="px-3 py-1.5 rounded-xl border border-surface-border bg-surface-elevated body-xs text-content-secondary hover:text-content-primary flex items-center gap-1.5 transition-colors"
+              className="px-3 py-1.5 rounded-xl border border-surface-border bg-surface-elevated body-xs text-content-secondary hover:text-content-primary flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               <Eye className="w-3.5 h-3.5 text-brand-400" />
               <span>Columns</span>
@@ -200,7 +200,7 @@ export default function AdvancedDataTable() {
           <button
             onClick={() => setFreezeFirstCol(!freezeFirstCol)}
             aria-label={freezeFirstCol ? "Unfreeze first column" : "Freeze first column"}
-            className={`px-3 py-1.5 rounded-xl border body-xs flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-xl border body-xs flex items-center gap-1.5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
               freezeFirstCol
                 ? 'border-brand-500/40 bg-brand-500/10 text-brand-400 font-semibold'
                 : 'border-surface-border bg-surface-elevated text-content-secondary'
@@ -214,7 +214,7 @@ export default function AdvancedDataTable() {
           <button
             onClick={exportCSV}
             aria-label="Export filtered data to CSV"
-            className="px-3 py-1.5 rounded-xl border border-surface-border bg-surface-elevated body-xs text-content-primary hover:bg-brand-500/10 hover:border-brand-500/30 flex items-center gap-1.5 transition-colors font-medium"
+            className="px-3 py-1.5 rounded-xl border border-surface-border bg-surface-elevated body-xs text-content-primary hover:bg-brand-500/10 hover:border-brand-500/30 flex items-center gap-1.5 transition-colors font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             <Download className="w-3.5 h-3.5 text-brand-400" />
             <span>Export CSV</span>
@@ -224,7 +224,7 @@ export default function AdvancedDataTable() {
           <button
             onClick={() => setIsFullScreen(!isFullScreen)}
             aria-label={isFullScreen ? "Exit full screen view" : "Open full screen view"}
-            className="p-1.5 rounded-xl border border-surface-border bg-surface-elevated text-content-secondary hover:text-content-primary transition-colors"
+            className="p-1.5 rounded-xl border border-surface-border bg-surface-elevated text-content-secondary hover:text-content-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
           >
             {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -324,7 +324,8 @@ export default function AdvancedDataTable() {
           <select
             value={pageSize}
             onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-            className="bg-surface-elevated border border-surface-border rounded-lg px-2 py-1 text-content-primary focus:outline-none"
+            aria-label="Rows per page"
+            className="bg-surface-elevated border border-surface-border rounded-lg px-2 py-1 text-content-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus:border-brand-500"
           >
             <option value={10}>10</option>
             <option value={25}>25</option>
@@ -345,7 +346,7 @@ export default function AdvancedDataTable() {
               onClick={() => setPage(1)}
               disabled={currentPage === 1}
               aria-label="Go to first page"
-              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
+              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40 hover:text-content-primary hover:border-surface-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
             >
               <ChevronsLeft className="w-4 h-4" />
             </button>
@@ -353,7 +354,7 @@ export default function AdvancedDataTable() {
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
               aria-label="Go to previous page"
-              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
+              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40 hover:text-content-primary hover:border-surface-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -361,7 +362,7 @@ export default function AdvancedDataTable() {
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
               aria-label="Go to next page"
-              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
+              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40 hover:text-content-primary hover:border-surface-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -369,7 +370,7 @@ export default function AdvancedDataTable() {
               onClick={() => setPage(totalPages)}
               disabled={currentPage === totalPages}
               aria-label="Go to last page"
-              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40"
+              className="p-1 rounded-lg border border-surface-border bg-surface-elevated disabled:opacity-40 hover:text-content-primary hover:border-surface-borderStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
             >
               <ChevronsRight className="w-4 h-4" />
             </button>

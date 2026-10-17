@@ -11,6 +11,8 @@ export const DataProvider = ({ children }) => {
   const [datasetInfo, setDatasetInfo] = useState(null); // includes columns, dtypes, preview, etc.
   const [rawData, setRawData] = useState([]); // full rows (limited to 20000 for UI)
   const [filteredData, setFilteredData] = useState([]);
+  const [filteredTotal, setFilteredTotal] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
   const [filters, setFilters] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -26,6 +28,8 @@ export const DataProvider = ({ children }) => {
     setDatasetInfo(null);
     setRawData([]);
     setFilteredData([]);
+    setFilteredTotal(null);
+    setHasMore(false);
     setFilters({});
     setError(null);
     setLoading(false);
@@ -65,6 +69,8 @@ export const DataProvider = ({ children }) => {
       const previewRows = normalizedInfo.preview;
       setRawData(previewRows);
       setFilteredData(previewRows);
+      setFilteredTotal(normalizedInfo.shape[0] ?? previewRows.length);
+      setHasMore((normalizedInfo.shape[0] ?? 0) > previewRows.length);
     } catch (e) {
       setError(extractErrorMessage(e, 'Failed to upload dataset'));
     } finally {
@@ -92,6 +98,8 @@ export const DataProvider = ({ children }) => {
         {
           dataset_id: datasetInfo.dataset_id,
           filters: newFilters,
+          limit: 20000,
+          offset: 0,
         },
         { signal: abortController.signal }
       );
@@ -99,8 +107,12 @@ export const DataProvider = ({ children }) => {
       // Only update state if this is still the latest request
       if (requestSeq === filterRequestSeqRef.current) {
         const rows = resp.data.filtered_data || [];
+        const total = resp.data.total ?? resp.data.row_count ?? rows.length;
+        const more = Boolean(resp.data.has_more);
         setFilters(newFilters);
         setFilteredData(rows.slice(0, 20000)); // cap for UI
+        setFilteredTotal(total);
+        setHasMore(more);
       }
     } catch (e) {
       if (axios.isCancel(e) || e.name === 'CanceledError' || e.name === 'AbortError') {
@@ -124,15 +136,19 @@ export const DataProvider = ({ children }) => {
     if (rawData.length) {
       setFilteredData(rawData);
     }
+    setFilteredTotal(datasetInfo?.shape?.[0] ?? rawData.length);
+    setHasMore(false);
     await applyFilters({});
-  }, [datasetInfo?.dataset_id, rawData, applyFilters]);
+  }, [datasetInfo?.dataset_id, datasetInfo?.shape, rawData, applyFilters]);
 
   // Effect to keep filteredData in sync when raw data changes and no filters
   useEffect(() => {
     if (Object.keys(filters).length === 0 && rawData.length) {
       setFilteredData(rawData);
+      setFilteredTotal(datasetInfo?.shape?.[0] ?? rawData.length);
+      setHasMore(false);
     }
-  }, [rawData, filters]);
+  }, [rawData, filters, datasetInfo?.shape]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -147,6 +163,8 @@ export const DataProvider = ({ children }) => {
     datasetInfo,
     rawData,
     filteredData,
+    filteredTotal,
+    hasMore,
     filters,
     loading,
     error,
@@ -159,6 +177,8 @@ export const DataProvider = ({ children }) => {
     datasetInfo,
     rawData,
     filteredData,
+    filteredTotal,
+    hasMore,
     filters,
     loading,
     error,
