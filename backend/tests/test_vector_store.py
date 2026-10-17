@@ -204,20 +204,20 @@ def test_concurrent_ingestion_lock_prevents_race_on_dimension_reset(tmp_path):
     reset in one thread could delete vectors concurrently inserted by another thread.
     """
     import threading
-    import time
 
     store = ChromaVectorStore(
         collection_name="test_concurrent_race",
         persist_directory=str(tmp_path / "chroma_concurrent")
     )
 
-    results = {"thread_a_done": False, "thread_b_failed_as_expected": False}
+    barrier = threading.Barrier(2)
+    results = {}
     errors = []
 
     def task_a():
         try:
-            # Thread A inserts 3-dim embeddings for Dataset A
-            time.sleep(0.01)
+            # Synchronize thread start at barrier to ensure simultaneous contention
+            barrier.wait(timeout=5)
             chunk_a = Chunk(
                 chunk_id="ca_1",
                 doc_id="da",
@@ -226,13 +226,18 @@ def test_concurrent_ingestion_lock_prevents_race_on_dimension_reset(tmp_path):
             )
             store.add_chunks([chunk_a], [[0.1, 0.2, 0.3]])
             results["thread_a_done"] = True
+        except ValueError as ex:
+            if "dimension" in str(ex).lower():
+                results["thread_a_mismatch"] = True
+            else:
+                errors.append(f"Task A unexpected ValueError: {ex}")
         except Exception as ex:
             errors.append(f"Task A unexpected error: {ex}")
 
     def task_b():
         try:
-            # Thread B attempts to insert 2-dim embeddings for Dataset B
-            time.sleep(0.01)
+            # Synchronize thread start at barrier to ensure simultaneous contention
+            barrier.wait(timeout=5)
             chunk_b = Chunk(
                 chunk_id="cb_1",
                 doc_id="db",
@@ -240,9 +245,10 @@ def test_concurrent_ingestion_lock_prevents_race_on_dimension_reset(tmp_path):
                 metadata={"dataset_id": "ds_b"}
             )
             store.add_chunks([chunk_b], [[0.5, 0.6]])
+            results["thread_b_done"] = True
         except ValueError as ex:
             if "dimension" in str(ex).lower():
-                results["thread_b_failed_as_expected"] = True
+                results["thread_b_mismatch"] = True
             else:
                 errors.append(f"Task B unexpected ValueError: {ex}")
         except Exception as ex:
@@ -258,7 +264,18 @@ def test_concurrent_ingestion_lock_prevents_race_on_dimension_reset(tmp_path):
     t2.join(timeout=5)
 
     assert not errors, f"Unexpected thread errors occurred: {errors}"
-    # Verify that data preservation succeeded under concurrency
+    # Verify that data preservation succeeded under concurrency:
+    # Exactly one thread succeeds in establishing collection dimensions and inserting its chunk,
+    # and the other thread is serialized, blocked by _lock, encounters dimension mismatch, and refuses to wipe.
     total_vectors = store.collection.count()
     assert total_vectors == 1, f"Expected 1 vector preserved under concurrent execution, found {total_vectors}"
-    assert (results["thread_a_done"] and results["thread_b_failed_as_expected"]) or (not results["thread_a_done"] and not results["thread_b_failed_as_expected"])
+
+    if results.get("thread_a_done"):
+        assert results.get("thread_b_mismatch") is True, "Thread B should have failed with dimension mismatch"
+        assert store.count_vectors("ds_a") == 1
+        assert store.count_vectors("ds_b") == 0
+    else:
+        assert results.get("thread_b_done") is True, "Thread B should have succeeded if Thread A did not"
+        assert results.get("thread_a_mismatch") is True, "Thread A should have failed with dimension mismatch"
+        assert store.count_vectors("ds_b") == 1
+        assert store.count_vectors("ds_a") == 0
