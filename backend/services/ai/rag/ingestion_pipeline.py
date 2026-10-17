@@ -43,6 +43,9 @@ class IngestionPipeline:
         """Run the ingestion pipeline synchronously (called via BackgroundTasks)."""
         try:
             logger.info("Dataset Ingestion Started for '%s'", dataset_id)
+            if not dataset_manager.exists(dataset_id):
+                logger.info("Dataset '%s' was deleted before ingestion started; aborting.", dataset_id)
+                return
             dataset_manager.update_indexing_status(dataset_id, "PROCESSING")
 
             self._ensure_services_initialized()
@@ -52,6 +55,10 @@ class IngestionPipeline:
             documents = self.document_loader.load(source=df, dataset_id=dataset_id, filename=filename)
             logger.info("Dataset Loaded: %d documents created.", len(documents))
 
+            if not dataset_manager.exists(dataset_id):
+                logger.info("Dataset '%s' was deleted during document loading; aborting.", dataset_id)
+                return
+
             # 2. Chunker
             logger.info("Chunking Started for '%s'", dataset_id)
             chunks = self.chunker.chunk(documents)
@@ -59,7 +66,12 @@ class IngestionPipeline:
 
             if not chunks:
                 logger.warning("No chunks created for dataset '%s'. Completing early.", dataset_id)
-                dataset_manager.update_indexing_status(dataset_id, "READY")
+                if dataset_manager.exists(dataset_id):
+                    dataset_manager.update_indexing_status(dataset_id, "READY")
+                return
+
+            if not dataset_manager.exists(dataset_id):
+                logger.info("Dataset '%s' was deleted during chunking; aborting.", dataset_id)
                 return
 
             # 3. Embedding
@@ -69,6 +81,12 @@ class IngestionPipeline:
             logger.info("Embedding Completed for '%s'", dataset_id)
 
             # 4. Vector Store Insert
+            if not dataset_manager.exists(dataset_id):
+                logger.info("Dataset '%s' was deleted during embedding; aborting vector insert.", dataset_id)
+                if self.vector_store is not None:
+                    self.vector_store.delete_dataset(dataset_id)
+                return
+
             logger.info("Vector Store Insert Started for '%s'", dataset_id)
             
             # Clean up any existing vectors for this dataset_id to prevent duplicate orphans
@@ -76,6 +94,11 @@ class IngestionPipeline:
             
             self.vector_store.add_chunks(chunks, embeddings)
             logger.info("Vector Store Inserted for '%s'", dataset_id)
+
+            if not dataset_manager.exists(dataset_id):
+                logger.info("Dataset '%s' was deleted during vector insertion; rolling back vectors.", dataset_id)
+                self.vector_store.delete_dataset(dataset_id)
+                return
 
             # 5. Index Verification
             vector_count = self.vector_store.count_vectors(dataset_id)
@@ -104,7 +127,8 @@ class IngestionPipeline:
 
         except Exception as e:
             logger.exception("Ingestion failed for dataset '%s': %s", dataset_id, e)
-            dataset_manager.update_indexing_status(dataset_id, "FAILED")
+            if dataset_manager.exists(dataset_id):
+                dataset_manager.update_indexing_status(dataset_id, "FAILED")
             # We explicitly do NOT delete the dataset from dataset_manager to keep it available.
 
 # Singleton instance

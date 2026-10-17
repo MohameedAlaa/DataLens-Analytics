@@ -308,8 +308,9 @@ class DatasetManager:
     Supports pluggable storage engines for in-memory, disk Parquet, DuckDB, and Redis.
     """
 
-    def __init__(self, engine: Optional[BaseStorageEngine] = None) -> None:
+    def __init__(self, engine: Optional[BaseStorageEngine] = None, vector_store: Optional[Any] = None) -> None:
         self._engine: BaseStorageEngine = engine or InMemoryStorageEngine()
+        self._vector_store = vector_store
 
     def set_engine(self, engine: BaseStorageEngine) -> None:
         """Switch storage engine (e.g. DiskStorageEngine, RedisStorageEngine)."""
@@ -350,6 +351,23 @@ class DatasetManager:
             metadata.update(extra_meta)
 
         self._engine.store(dataset_id, df, metadata)
+        try:
+            from api_helpers import invalidate_dataset_context
+            invalidate_dataset_context(dataset_id)
+        except Exception:
+            pass
+        try:
+            vs = self._vector_store
+            if vs is None:
+                try:
+                    from backend.services.data.vector_store import get_vector_store
+                except ImportError:
+                    from services.data.vector_store import get_vector_store
+                vs = get_vector_store()
+            if vs is not None:
+                vs.delete_dataset(dataset_id)
+        except Exception as e:
+            logger.warning("Failed to clean up prior vectors on dataset registration for '%s': %s", dataset_id, e)
         logger.info("Registered dataset '%s' with UUID '%s' (Shape: %s, Status: PENDING)", filename, dataset_id, df.shape)
         return dataset_id
 
@@ -382,8 +400,32 @@ class DatasetManager:
         return self._engine.get_metadata(dataset_id_or_filename)
 
     def delete_dataset(self, dataset_id: str) -> bool:
-        """Remove dataset by dataset_id."""
-        return self._engine.delete(dataset_id)
+        """Remove dataset by dataset_id, purging primary storage, context cache, and vector store."""
+        res = self._engine.delete(dataset_id)
+        try:
+            from api_helpers import invalidate_dataset_context
+            invalidate_dataset_context(dataset_id)
+        except Exception as e:
+            logger.warning("Failed to invalidate dataset context for '%s': %s", dataset_id, e)
+
+        try:
+            vs = self._vector_store
+            if vs is None:
+                try:
+                    from backend.services.data.vector_store import get_vector_store
+                except ImportError:
+                    from services.data.vector_store import get_vector_store
+                vs = get_vector_store()
+            if vs is not None:
+                vs.delete_dataset(dataset_id)
+        except Exception as e:
+            logger.error(
+                "Partial cleanup failure: dataset '%s' deleted from primary storage, but vector cleanup encountered an error: %s",
+                dataset_id,
+                e,
+            )
+
+        return res
 
     def exists(self, dataset_id_or_filename: str) -> bool:
         """Check if dataset exists by dataset_id or filename."""

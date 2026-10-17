@@ -89,6 +89,12 @@ class _Settings:
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_MB", "50")) * 1024 * 1024
     upload_preview_limit: int = int(os.getenv("UPLOAD_PREVIEW_LIMIT", "100"))
 
+    # --- Filter response limits ---
+    max_filter_limit: int = int(os.getenv("MAX_FILTER_LIMIT", "50000"))
+
+    # --- Dataset context cache ---
+    dataset_context_cache_size: int = int(os.getenv("DATASET_CONTEXT_CACHE_SIZE", "100"))
+
     # --- CORS ---
     # Comma-separated list.  Use "*" only during local dev; set explicit
     # origins in production via CORS_ORIGINS or CORS_ALLOWED_ORIGINS env var.

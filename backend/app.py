@@ -248,6 +248,8 @@ class FilterRequest(BaseModel):
     dataset_id: Optional[str] = None
     filename: Optional[str] = None
     data: Optional[List[Dict[str, Any]]] = None
+    limit: Optional[int] = Field(default=None, ge=1, le=50000)
+    offset: Optional[int] = Field(default=None, ge=0)
 
     @model_validator(mode="before")
     @classmethod
@@ -274,11 +276,14 @@ class FilterRequest(BaseModel):
 async def filter_data(
     request: Request, 
     req: FilterRequest,
+    limit: Optional[int] = Query(default=None, ge=1, le=50000),
+    offset: Optional[int] = Query(default=None, ge=0),
     dataset_manager: DatasetManager = Depends(get_dataset_manager)
 ) -> JSONResponse:
     """Filter a stored dataset by criteria.
 
     Supply ``dataset_id`` or inline ``data`` rows.
+    Supports bounded pagination via ``limit`` and ``offset`` in request body or query params.
     """
     request_id = getattr(request.state, "request_id", "?")
     lookup_key = req.dataset_id
@@ -302,8 +307,16 @@ async def filter_data(
             detail="Provide 'dataset_id', 'filename', or 'data' to filter.",
         )
 
+    effective_limit = req.limit if req.limit is not None else limit
+    effective_offset = req.offset if req.offset is not None else (offset if offset is not None else 0)
+
     try:
-        summary = apply_filters(target_data, req.filters)
+        summary = apply_filters(
+            target_data,
+            req.filters,
+            limit=effective_limit,
+            offset=effective_offset,
+        )
         return JSONResponse(content=summary)
     except Exception as exc:
         logger.exception(
