@@ -401,7 +401,7 @@ export default function AIInsightsSection({ onPromptSelect }) {
         <button
           onClick={() => toggleSection(id)}
           aria-expanded={isExpanded}
-          className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-surface-elevated/40 active:bg-surface-elevated/60 transition-colors focus-visible:outline-none"
+          className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-surface-elevated/40 active:bg-surface-elevated/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-inset"
         >
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 rounded-lg bg-surface-elevated border border-surface-border text-brand-400">
@@ -678,7 +678,7 @@ export default function AIInsightsSection({ onPromptSelect }) {
           {suggestedQs.map((q, i) => (
             <button key={i}
               onClick={() => onPromptSelect && onPromptSelect(q.text)}
-              className="flex items-start gap-2.5 p-3 rounded-xl border border-surface-border bg-surface-elevated/40 text-left hover:bg-surface-elevated hover:border-brand-500/30 transition-all group">
+              className="flex items-start gap-2.5 p-3 rounded-xl border border-surface-border bg-surface-elevated/40 text-left hover:bg-surface-elevated hover:border-brand-500/30 transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
               <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20 flex-shrink-0 mt-0.5">{q.category}</span>
               <p className="text-xs text-content-secondary group-hover:text-content-primary transition-colors">{q.text}</p>
               <ChevronRight className="w-3.5 h-3.5 text-content-muted group-hover:text-brand-400 transition-colors ml-auto flex-shrink-0 mt-0.5" />

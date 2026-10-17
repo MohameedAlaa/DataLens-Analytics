@@ -105,6 +105,7 @@ West,Enterprise,6100,25,Q2`,
             ? 'border-brand-400 bg-brand-500/10 shadow-glow-brand scale-[1.01]'
             : 'border-surface-border hover:border-brand-500/50 bg-surface-card/60 hover:bg-surface-card/90 shadow-card'
           }
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-bg
         `}
         role="button"
         tabIndex={0}
@@ -212,7 +213,8 @@ West,Enterprise,6100,25,Q2`,
                 loadSampleDataset(sample);
               }}
               className="p-4 rounded-2xl border border-surface-border bg-surface-card/70 hover:bg-surface-elevated/80
-                         hover:border-brand-500/30 text-left transition-all duration-150 active:scale-[0.98] group flex items-center justify-between"
+                         hover:border-brand-500/30 text-left transition-all duration-150 active:scale-[0.98] group flex items-center justify-between
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               <div className="space-y-1">
                 <div className="flex items-center gap-2">

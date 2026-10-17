@@ -28,7 +28,7 @@ import {
  * - Restrained, clean SaaS card accordions with subtle hover and active states
  */
 export default function Filters() {
-  const { datasetInfo, rawData, filteredData } = useData();
+  const { datasetInfo, rawData, filteredData, filteredTotal, hasMore } = useData();
   const { applyFilters, resetFilters, filters, loading, error } = useFilters();
 
   const [isSectionOpen, setIsSectionOpen] = useState(true);
@@ -383,7 +383,7 @@ export default function Filters() {
         <button
           type="button"
           onClick={() => setIsSectionOpen((prev) => !prev)}
-          className="flex items-center gap-2 group text-left focus:outline-none"
+          className="flex items-center gap-2 group text-left rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           aria-expanded={isSectionOpen}
           aria-label="Toggle Dataset Filters Section"
         >
@@ -409,7 +409,7 @@ export default function Filters() {
                 onClick={handleResetFilters}
                 title="Clear all active filters"
                 aria-label="Clear all active filters"
-                className="text-[11px] text-content-muted hover:text-red-400 hover:underline px-1 py-0.5 font-medium transition-colors"
+                className="text-[11px] text-content-muted hover:text-red-400 hover:underline px-1 py-0.5 font-medium transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               >
                 Clear all
               </button>
@@ -429,7 +429,7 @@ export default function Filters() {
             <div className="rounded-xl border border-surface-border/60 bg-surface-card/30 p-3 text-center">
               <Filter className="w-4 h-4 text-content-muted mx-auto mb-1.5 opacity-60" />
               <p className="body-xs text-content-muted font-medium">No dataset active</p>
-              <p className="text-[10px] text-content-muted/70 mt-0.5">Upload a dataset to activate filters</p>
+              <p className="text-[10px] text-content-muted mt-0.5">Upload a dataset to activate filters</p>
             </div>
           ) : !allColumns.length ? (
             <div className="rounded-xl border border-surface-border/60 bg-surface-card/30 p-3 text-center">
@@ -554,7 +554,7 @@ export default function Filters() {
                       aria-expanded={isOpen}
                       aria-label={`Filter by ${col}`}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 text-left
-                                 hover:bg-surface-elevated/60 transition-colors focus:outline-none"
+                                 hover:bg-surface-elevated/60 transition-colors rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                     >
                       <span className="flex items-center gap-2 min-w-0">
                         <Icon className={`w-3 h-3 shrink-0 ${isColActive ? 'text-brand-400' : 'text-content-muted'}`} />
@@ -620,8 +620,8 @@ export default function Filters() {
                                   onChange={(e) => handleCategorySearchChange(col, e.target.value)}
                                   aria-label={`Search values in ${col}`}
                                   className="w-full pl-6 pr-6 py-0.5 text-[11px] rounded-md bg-surface-bg border border-surface-border/70
-                                             text-content-primary placeholder:text-content-muted/70
-                                             focus:border-brand-500/60 focus:bg-surface-bg focus:outline-none transition-colors"
+                                             text-content-primary placeholder:text-content-muted
+                                             focus:border-brand-500/60 focus:bg-surface-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
                                 />
                                 {queryText && (
                                   <button
@@ -760,9 +760,10 @@ export default function Filters() {
                                       [col]: { range: [e.target.value, cur[1]] }
                                     }))
                                   }
+                                  aria-label={`Minimum value for ${col}`}
                                   className="w-full min-w-0 px-2 py-1 rounded-md text-xs text-content-primary
                                              bg-surface-bg border border-surface-border
-                                             focus:border-brand-500 focus:outline-none transition-colors"
+                                             focus:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
                                 />
                                 <span className="text-content-muted text-xs shrink-0">–</span>
                                 <input
@@ -775,9 +776,10 @@ export default function Filters() {
                                       [col]: { range: [cur[0], e.target.value] }
                                     }))
                                   }
+                                  aria-label={`Maximum value for ${col}`}
                                   className="w-full min-w-0 px-2 py-1 rounded-md text-xs text-content-primary
                                              bg-surface-bg border border-surface-border
-                                             focus:border-brand-500 focus:outline-none transition-colors"
+                                             focus:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
                                 />
                               </div>
                               {bounds && (
@@ -808,9 +810,10 @@ export default function Filters() {
                                         [col]: { range: [e.target.value, cur[1]] }
                                       }))
                                     }
+                                    aria-label={`Start date for ${col}`}
                                     className="w-full min-w-0 px-1.5 py-1 rounded-md text-xs text-content-primary
                                                bg-surface-bg border border-surface-border
-                                               focus:border-brand-500 focus:outline-none transition-colors"
+                                               focus:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
                                   />
                                 </div>
                                 <div>
@@ -824,9 +827,10 @@ export default function Filters() {
                                         [col]: { range: [cur[0], e.target.value] }
                                       }))
                                     }
+                                    aria-label={`End date for ${col}`}
                                     className="w-full min-w-0 px-1.5 py-1 rounded-md text-xs text-content-primary
                                                bg-surface-bg border border-surface-border
-                                               focus:border-brand-500 focus:outline-none transition-colors"
+                                               focus:border-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors"
                                   />
                                 </div>
                               </div>
@@ -851,7 +855,12 @@ export default function Filters() {
                   <span className="text-brand-300">Filtering dataset…</span>
                 </>
               ) : (
-                <span>{filteredData?.length ? `${filteredData.length.toLocaleString()} matching rows` : ''}</span>
+                <span>
+                  {filteredTotal != null
+                    ? `${filteredTotal.toLocaleString()} matching rows`
+                    : (filteredData?.length ? `${filteredData.length.toLocaleString()} matching rows` : '')}
+                  {hasMore ? ' (showing first 20,000)' : ''}
+                </span>
               )}
             </span>
 

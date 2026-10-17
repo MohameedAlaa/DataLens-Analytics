@@ -251,7 +251,7 @@ export default function Chatbot({
                 <button
                   type="button"
                   onClick={resetChat}
-                  className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors"
+                  className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                   title="Clear chat history"
                   aria-label="Clear chat history"
                 >
@@ -261,7 +261,7 @@ export default function Chatbot({
               <button
                 type="button"
                 onClick={handleClose}
-                className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors"
+                className="p-1.5 rounded-lg border border-surface-border text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                 title="Close AI Copilot"
                 aria-label="Close AI Copilot"
               >
@@ -320,7 +320,7 @@ export default function Chatbot({
                                 handleSend();
                               }
                             }}
-                            className="w-full text-left p-2.5 rounded-xl border border-surface-border bg-surface-elevated/40 hover:bg-surface-elevated hover:border-brand-500/30 transition-all flex items-start gap-2.5 group"
+                            className="w-full text-left p-2.5 rounded-xl border border-surface-border bg-surface-elevated/40 hover:bg-surface-elevated hover:border-brand-500/30 transition-all flex items-start gap-2.5 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                           >
                             <QIcon className="w-3.5 h-3.5 text-brand-400 shrink-0 mt-0.5" />
                             <span className="text-[11px] text-content-secondary group-hover:text-content-primary transition-colors flex-1 leading-snug">
@@ -441,13 +441,13 @@ export default function Chatbot({
                 disabled={loading || !datasetInfo}
                 placeholder={datasetInfo ? 'Ask AI Copilot about dataset...' : 'Upload dataset to start querying'}
                 aria-label="Ask AI Copilot about dataset"
-                className="w-full bg-surface-elevated border border-surface-border text-content-primary text-xs rounded-xl pl-3 pr-10 py-2.5 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-content-muted disabled:opacity-50 transition-colors"
+                className="w-full bg-surface-elevated border border-surface-border text-content-primary text-xs rounded-xl pl-3 pr-10 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus:border-brand-500 placeholder:text-content-muted disabled:opacity-50 transition-colors"
               />
               <button
                 type="submit"
                 disabled={loading || !datasetInfo}
                 aria-label="Send message"
-                className="absolute right-1.5 p-1.5 rounded-lg bg-brand-400 text-[#111215] hover:bg-brand-500 active:scale-95 disabled:opacity-40 transition-all"
+                className="absolute right-1.5 p-1.5 rounded-lg bg-brand-400 text-[#111215] hover:bg-brand-500 active:scale-95 disabled:opacity-40 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-elevated"
               >
                 {loading ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />

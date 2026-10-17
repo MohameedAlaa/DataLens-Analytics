@@ -144,7 +144,7 @@ body {
 
 /* ── Focus Rings & Accessibility ────────────────────────────────────── */
 *:focus-visible {
-  outline: 2px solid rgba(212, 242, 55, 0.75);
+  outline: 2px solid #d4f237;
   outline-offset: 2px;
 }
 

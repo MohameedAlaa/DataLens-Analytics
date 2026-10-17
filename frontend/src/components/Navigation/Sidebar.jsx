@@ -58,6 +58,7 @@ export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false,
                     w-full flex items-center justify-between
                     px-2.5 py-1.5 rounded-lg text-xs font-medium
                     transition-all duration-150 ease-out active:scale-[0.98] text-left
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400
                     ${isActive
                       ? 'bg-brand-500/10 text-brand-400 border border-brand-500/30 font-semibold shadow-sm'
                       : 'text-content-secondary hover:bg-surface-elevated/70 hover:text-content-primary border border-transparent'
@@ -149,7 +150,7 @@ export default function Sidebar({ activeTab, setActiveTab, isOpenMobile = false,
                 type="button"
                 onClick={onCloseMobile}
                 aria-label="Close menu"
-                className="p-1 rounded-lg text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors"
+                className="p-1 rounded-lg text-content-muted hover:text-content-primary hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               >
                 <X className="w-4 h-4" />
               </button>

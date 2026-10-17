@@ -42,7 +42,7 @@ export default class ErrorBoundary extends React.Component {
           </p>
           <button
             onClick={this.handleReset}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-surface-border bg-surface-elevated text-content-primary body-xs font-semibold hover:bg-surface-card transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-surface-border bg-surface-elevated text-content-primary body-xs font-semibold hover:bg-surface-card transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             <RefreshCw className="w-3.5 h-3.5 text-brand-400" />
             <span>Try Again</span>
