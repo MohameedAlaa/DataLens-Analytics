@@ -45,8 +45,8 @@ module.exports = {
         },
         content: {
           primary: '#f5f4ef',     // Warm Ivory - High contrast, soft on eyes
-          secondary: '#a1a1aa',   // Flint neutral gray
-          muted: '#71717a',       // Architectural stone gray
+          secondary: '#b0b0bb',   // Flint neutral gray (exceeds 4.5:1 on all surfaces)
+          muted: '#9494a3',       // Architectural stone gray (exceeds 4.5:1 on all surfaces)
         },
         ivory: {
           DEFAULT: '#f5f4ef',

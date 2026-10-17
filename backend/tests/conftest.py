@@ -19,10 +19,18 @@ from api_helpers import _context_cache
 
 
 @pytest.fixture(autouse=True)
-def reset_state():
+def reset_state(monkeypatch):
     """Reset in-memory dataset manager, rate limiter, and chat context cache before every test."""
     if limiter is not None:
         limiter.enabled = False
+
+    # Ensure hermetic testing: use built-in deterministic pseudo-embeddings instead of live Gemini API
+    from services.ai.embeddings.embedding_service import GeminiEmbeddingService
+    monkeypatch.setattr(
+        GeminiEmbeddingService,
+        "_embed_batch",
+        lambda self, texts: [self._deterministic_pseudo_embedding(t) for t in texts],
+    )
 
     dataset_manager = app.state.dataset_manager
 

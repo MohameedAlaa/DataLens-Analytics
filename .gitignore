@@ -15,4 +15,4 @@ backend/chroma_db/
 *.sqlite3
 dataset_storage/
 backend/dataset_storage/
-
+.venv

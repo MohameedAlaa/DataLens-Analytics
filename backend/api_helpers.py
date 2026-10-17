@@ -1,8 +1,10 @@
 import collections
+import datetime
 import io
 import json
 import logging
 import math
+import threading
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
@@ -43,6 +45,14 @@ try:
 except ImportError:
     from .AI import call_ai, call_ai_async
 
+try:
+    from config import settings
+except ImportError:
+    try:
+        from backend.config import settings
+    except ImportError:
+        settings = None
+
 # Initialize single orchestrator engine for backend operations
 logger = logging.getLogger(__name__)
 # (Removed legacy InsightEngine to prevent duplicate RAG paths and mock database queries)
@@ -65,11 +75,80 @@ MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB limit
 SUPPORTED_EXTENSIONS = (".csv", ".xlsx", ".xls")
 
 
+def sanitize_json_value(val: Any) -> Any:
+    """Normalize a scalar value for RFC 8259-compliant JSON serialization.
+
+    Converts non-finite floats (NaN, +inf, -inf), pandas NA/NaT, and missing
+    values to None (JSON null), while strictly preserving valid numbers (including 0 and 0.0),
+    booleans, strings, and collections.
+    """
+    if val is None:
+        return None
+
+    # Handle pandas / numpy missing sentinel types (pd.NA, pd.NaT)
+    if val is pd.NA or val is pd.NaT:
+        return None
+
+    # Check bool before int, as bool is a subclass of int in Python
+    if isinstance(val, (bool, np.bool_)):
+        return bool(val)
+
+    # Preserve valid integers
+    if isinstance(val, (int, np.integer)):
+        return int(val)
+
+    # Handle floating point types and check for NaN, +inf, -inf
+    if isinstance(val, (float, np.floating)):
+        if math.isnan(val) or math.isinf(val):
+            return None
+        return float(val)
+
+    # Check timestamps and datetime objects
+    if isinstance(val, (pd.Timestamp, datetime.datetime, datetime.date)):
+        if pd.isna(val):
+            return None
+        return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+    # Catch any remaining pandas NA/null representations
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(val, dict):
+        return {str(k): sanitize_json_value(v) for k, v in val.items()}
+
+    if isinstance(val, (list, tuple, set)):
+        return [sanitize_json_value(item) for item in val]
+
+    return val
+
+
+def sanitize_records_for_json(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sanitize a list of row dictionaries so that all non-finite floats,
+    missing values (NaN, NaT, pd.NA), and datetime objects are safely JSON-serializable.
+    """
+    if not records:
+        return []
+    return [
+        {str(k): sanitize_json_value(v) for k, v in record.items()}
+        for record in records
+    ]
+
+
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Categorize dataframe columns into numeric, categorical, and date groups."""
     numeric = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    categorical = [str(c) for c in df.columns if pd.api.types.is_object_dtype(df[c])]
     date = [str(c) for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    categorical = [
+        str(c) for c in df.columns
+        if str(c) not in numeric and str(c) not in date and (
+            pd.api.types.is_object_dtype(df[c])
+            or pd.api.types.is_string_dtype(df[c])
+            or pd.api.types.is_categorical_dtype(df[c])
+        )
+    ]
     return {
         "numeric_columns": numeric,
         "categorical_columns": categorical,
@@ -77,30 +156,52 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     }
 
 
+def _numeric_frame_for_stats(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
+    """Return a copy of the numeric columns suitable for describe()/corr().
+
+    pandas reports bool columns as numeric dtype, but DataFrame.describe()
+    silently omits them when other numeric columns are present. Boolean columns
+    are therefore represented as 0/1 floats (missing -> NaN) for statistics only;
+    the source DataFrame is never modified.
+    """
+    frame = df[numeric_cols].copy()
+    for col in numeric_cols:
+        if pd.api.types.is_bool_dtype(frame[col]):
+            frame[col] = frame[col].astype("Float64").astype("float64")
+    return frame
+
+
 def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
     """Calculate numerical statistics, categorical summaries, and correlation matrix."""
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    categorical_cols = [c for c in df.columns if pd.api.types.is_object_dtype(df[c])]
+    types = classify_columns(df)
+    numeric_cols = types["numeric_columns"]
+    categorical_cols = types["categorical_columns"]
+
+    numeric_frame = _numeric_frame_for_stats(df, numeric_cols) if numeric_cols else None
 
     numeric_summary = {}
     if numeric_cols:
-        desc = df[numeric_cols].describe().to_dict()
+        desc = numeric_frame.describe().to_dict()
         for col in numeric_cols:
+            raw_count = desc[col].get("count", 0)
             numeric_summary[str(col)] = {
-                "count": desc[col].get("count", 0),
-                "mean": None if pd.isna(desc[col].get("mean")) else float(desc[col]["mean"]),
-                "std": None if pd.isna(desc[col].get("std")) else float(desc[col]["std"]),
-                "min": None if pd.isna(desc[col].get("min")) else float(desc[col]["min"]),
-                "25%": None if pd.isna(desc[col].get("25%")) else float(desc[col]["25%"]),
-                "50%": None if pd.isna(desc[col].get("50%")) else float(desc[col]["50%"]),
-                "75%": None if pd.isna(desc[col].get("75%")) else float(desc[col]["75%"]),
-                "max": None if pd.isna(desc[col].get("max")) else float(desc[col]["max"]),
+                "count": int(raw_count) if isinstance(raw_count, (int, np.integer)) else float(raw_count),
+                "mean": sanitize_json_value(desc[col].get("mean")),
+                "std": sanitize_json_value(desc[col].get("std")),
+                "min": sanitize_json_value(desc[col].get("min")),
+                "25%": sanitize_json_value(desc[col].get("25%")),
+                "50%": sanitize_json_value(desc[col].get("50%")),
+                "75%": sanitize_json_value(desc[col].get("75%")),
+                "max": sanitize_json_value(desc[col].get("max")),
             }
 
     corr_matrix = {}
     if len(numeric_cols) > 1:
-        corr_df = df[numeric_cols].corr().fillna(0)
-        corr_matrix = {str(c): corr_df[c].to_dict() for c in corr_df.columns}
+        corr_df = numeric_frame.corr().replace([np.inf, -np.inf], 0).fillna(0)
+        corr_matrix = {
+            str(c): {str(k): sanitize_json_value(v) for k, v in corr_df[c].to_dict().items()}
+            for c in corr_df.columns
+        }
 
     categorical_summary = {}
     for col in categorical_cols:
@@ -116,6 +217,96 @@ def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
         "numeric_summary": numeric_summary,
         "categorical_summary": categorical_summary,
         "correlation_matrix": corr_matrix,
+    }
+
+
+def compute_filter_options(df: pd.DataFrame, max_categories: int = 50) -> Dict[str, Any]:
+    """Derive dataset-wide numeric bounds, categorical options, and date ranges
+    from the full DataFrame for frontend filter controls.
+    """
+    types = classify_columns(df)
+    filter_opts: Dict[str, Any] = {}
+
+    for col in types["numeric_columns"]:
+        s = df[col].dropna()
+        if not s.empty:
+            min_v = s.min()
+            max_v = s.max()
+            if pd.notna(min_v) and pd.notna(max_v) and not np.isinf(min_v) and not np.isinf(max_v):
+                min_clean = int(min_v) if isinstance(min_v, (int, np.integer)) else float(min_v)
+                max_clean = int(max_v) if isinstance(max_v, (int, np.integer)) else float(max_v)
+                filter_opts[str(col)] = {"bounds": [min_clean, max_clean]}
+            else:
+                filter_opts[str(col)] = {"bounds": None}
+        else:
+            filter_opts[str(col)] = {"bounds": None}
+
+    for col in types["categorical_columns"]:
+        # Count by string label so values with identical representations
+        # (e.g. numeric 1 and string "1") form a single option, matching
+        # search_category_values and the /filter label semantics.
+        s = df[col].dropna().astype(str)
+        if not s.empty:
+            counts = s.value_counts().head(max_categories)
+            top_vals = [
+                {"value": str(k), "count": int(v)}
+                for k, v in counts.items()
+            ]
+            filter_opts[str(col)] = {"top_values": top_vals}
+        else:
+            filter_opts[str(col)] = {"top_values": []}
+
+    for col in types["date_columns"]:
+        s = df[col].dropna()
+        if not s.empty:
+            min_d = str(s.min())
+            max_d = str(s.max())
+            filter_opts[str(col)] = {"bounds": [min_d, max_d]}
+        else:
+            filter_opts[str(col)] = {"bounds": None}
+
+    return filter_opts
+
+
+def search_category_values(
+    df: pd.DataFrame,
+    column: str,
+    query: str = "",
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Search distinct values and their counts in a dataset column.
+
+    Excludes null/NaN values, handles mixed types, and performs case-insensitive
+    literal substring matching (regex=False to prevent ReDoS).
+    """
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in dataset.")
+
+    limit = max(1, min(limit, 100))
+    s = df[column].dropna().astype(str)
+
+    cleaned_query = query.strip() if query else ""
+    if cleaned_query:
+        mask = s.str.contains(cleaned_query, case=False, regex=False, na=False)
+        matched = s[mask]
+    else:
+        matched = s
+
+    val_counts = matched.value_counts()
+    total_matches = int(len(val_counts))
+    top_items = val_counts.head(limit)
+
+    values = [
+        {"value": str(k), "count": int(v)}
+        for k, v in top_items.items()
+    ]
+
+    return {
+        "column": column,
+        "query": cleaned_query,
+        "total_matches": total_matches,
+        "truncated": total_matches > limit,
+        "values": values,
     }
 
 
@@ -254,10 +445,13 @@ def parse_dataset_bytes(
 
     preview_df = df.head(preview_limit).copy()
     for col in preview_df.select_dtypes(include=["datetime", "datetime64"]).columns:
-        preview_df[col] = preview_df[col].astype(str)
+        preview_df[col] = preview_df[col].apply(
+            lambda x: None if pd.isna(x) else str(x)
+        )
 
-    preview = preview_df.to_dict(orient="records")
+    preview = sanitize_records_for_json(preview_df.to_dict(orient="records"))
     types = classify_columns(df)
+    filter_options = compute_filter_options(df)
     dataset_id = str(uuid.uuid4())
 
     return {
@@ -267,6 +461,7 @@ def parse_dataset_bytes(
         "dtypes": dtypes,
         "shape": list(df.shape),
         "preview": preview,
+        "filter_options": filter_options,
         **types,
     }
 
@@ -292,11 +487,50 @@ class AIRateLimitError(RuntimeError):
 # is CPU-intensive for large datasets. We cache the result per dataset_id
 # so it is computed exactly once and reused across every chat turn.
 #
-# Eviction: simple LRU with a hard cap — oldest entry removed when full.
+# Eviction: LRU with an explicit upper bound (default 100 entries, configurable
+# via settings.dataset_context_cache_size or DATASET_CONTEXT_CACHE_SIZE env var).
+# Thread safety: synchronized with an internal lock to protect OrderedDict
+# mutations across concurrent worker threads.
+# Lifecycle: invalidated when a dataset is deleted or re-registered with new data.
 # ---------------------------------------------------------------------------
 
-_CONTEXT_CACHE_MAX = 100
+_CONTEXT_CACHE_LOCK = threading.Lock()
+
+
+def _get_context_cache_max() -> int:
+    """Retrieve maximum dataset context cache entries from application settings."""
+    try:
+        from config import settings
+        return getattr(settings, "dataset_context_cache_size", 100)
+    except Exception:
+        return 100
+
+
+_CONTEXT_CACHE_MAX = _get_context_cache_max()
 _context_cache: collections.OrderedDict = collections.OrderedDict()  # dataset_id -> context str
+_DATASET_CONTEXT_CACHE = _context_cache  # Canonical alias for AI-01 audit finding compatibility
+
+
+def invalidate_dataset_context(dataset_id: Optional[str] = None) -> bool:
+    """Invalidate cached dataset context for a given dataset_id, or clear all if None.
+
+    Args:
+        dataset_id: Optional UUID of the dataset whose context to purge. If None,
+                    the entire context cache is cleared.
+
+    Returns:
+        True if an entry was removed or cache was non-empty, False otherwise.
+    """
+    with _CONTEXT_CACHE_LOCK:
+        if dataset_id is None:
+            had_items = len(_context_cache) > 0
+            _context_cache.clear()
+            return had_items
+        if dataset_id in _context_cache:
+            del _context_cache[dataset_id]
+            return True
+        return False
+
 
 # Maximum number of conversation turns kept in the prompt.
 # Older turns are dropped to prevent unbounded prompt growth.
@@ -411,23 +645,27 @@ def _build_representative_sample(
 def build_dataset_context(dataset_id: str, df: pd.DataFrame, filename: str) -> str:
     """Build and LRU-cache the dataset context string for the AI system prompt.
 
-    The context is keyed by ``dataset_id`` (UUID).  Because each UUID maps to
-    a single immutable upload, the cache never returns stale data — there is no
-    need to invalidate entries manually.
+    The context is keyed by ``dataset_id`` (UUID).  To prevent memory leaks and
+    stale context, entries are bounded by an explicit LRU capacity and automatically
+    invalidated when a dataset is deleted or replaced.
 
     Args:
         dataset_id: UUID assigned at upload time.
-        df:         Full dataset DataFrame (used only on cache miss).
+        df:         Full dataset DataFrame (used only on cache miss or reconstruction).
         filename:   Original filename for display in the prompt.
 
     Returns:
         A multi-line string describing the dataset schema, column statistics,
         and a representative row sample.
     """
-    if dataset_id and dataset_id in _context_cache:
-        _context_cache.move_to_end(dataset_id)   # refresh LRU position
-        return _context_cache[dataset_id]
+    if dataset_id:
+        with _CONTEXT_CACHE_LOCK:
+            if dataset_id in _context_cache:
+                _context_cache.move_to_end(dataset_id)   # refresh LRU position
+                return _context_cache[dataset_id]
 
+    # Compute expensive column statistics and sampling outside the lock to prevent
+    # serializing unrelated worker requests.
     rows, cols = df.shape
     col_stats = _build_column_stats(df)
     sample = _build_representative_sample(df, max_rows=20)
@@ -441,9 +679,12 @@ def build_dataset_context(dataset_id: str, df: pd.DataFrame, filename: str) -> s
     )
 
     if dataset_id:
-        _context_cache[dataset_id] = context
-        if len(_context_cache) > _CONTEXT_CACHE_MAX:
-            _context_cache.popitem(last=False)   # evict oldest entry
+        max_size = _get_context_cache_max()
+        with _CONTEXT_CACHE_LOCK:
+            _context_cache[dataset_id] = context
+            _context_cache.move_to_end(dataset_id)
+            while len(_context_cache) > max_size:
+                _context_cache.popitem(last=False)   # evict oldest entry
 
     logger.debug(
         "Built dataset context for dataset_id='%s' (%.1f KB, cached)",
@@ -515,6 +756,25 @@ def build_llm_service() -> RagLLMService:
 # Filter helper (unrelated to chat — kept in place)
 # ---------------------------------------------------------------------------
 
+def _categorical_label_mask(series: pd.Series, condition: List[Any]) -> pd.Series:
+    """Boolean mask selecting rows whose value is in ``condition``.
+
+    Numeric/boolean/datetime columns keep exact ``isin`` semantics. For
+    object/string/categorical columns, values are compared by string label so a
+    selected label such as "1" matches both numeric 1 and string "1" (the same
+    label grouping used by compute_filter_options and search_category_values).
+    Nulls never match. The input series is not modified.
+    """
+    if (
+        pd.api.types.is_numeric_dtype(series)
+        or pd.api.types.is_bool_dtype(series)
+        or pd.api.types.is_datetime64_any_dtype(series)
+    ):
+        return series.isin(condition)
+    labels = {str(c) for c in condition}
+    return series.notna() & series.astype(str).isin(labels)
+
+
 def filter_dataframe(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
     """Apply dictionary filtering criteria to a DataFrame and return filtered DataFrame."""
     if df.empty or not filters:
@@ -551,7 +811,7 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
                     res = res[res[col] != condition["!="]]
         else:
             if isinstance(condition, list):
-                res = res[res[col].isin(condition)]
+                res = res[_categorical_label_mask(res[col], condition)]
             else:
                 res = res[res[col] == condition]
     return res
@@ -559,20 +819,77 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
 
 def apply_filters(
     data_or_df: Union[pd.DataFrame, List[Dict[str, Any]]],
-    filters: Dict[str, Any]
+    filters: Dict[str, Any],
+    limit: Optional[int] = None,
+    offset: int = 0,
 ) -> Dict[str, Any]:
-    """Apply dictionary filtering criteria to a DataFrame or row dictionaries."""
+    """Apply dictionary filtering criteria to a DataFrame or row dictionaries.
+
+    Supports bounded pagination via `limit` and `offset`.
+    If `limit` is None, matching rows are returned up to `settings.max_filter_limit`.
+    """
     if isinstance(data_or_df, pd.DataFrame):
         df = data_or_df.copy()
     else:
         df = pd.DataFrame(data_or_df)
 
+    safe_offset = max(0, offset) if offset is not None else 0
+    max_cap = getattr(settings, "max_filter_limit", 50000) if settings else 50000
+
     if df.empty:
-        return {"row_count": 0, "filtered_data": []}
+        return {
+            "row_count": 0,
+            "total": 0,
+            "filtered_data": [],
+            "limit": limit if limit is not None else max_cap,
+            "offset": safe_offset,
+            "has_more": False,
+            "page": 1,
+            "total_pages": 0,
+        }
 
     filtered_df = filter_dataframe(df, filters)
-    filtered = filtered_df.to_dict(orient="records")
-    return {"row_count": len(filtered), "filtered_data": filtered}
+    total_matching = len(filtered_df)
+
+    if limit is not None:
+        effective_limit = max(1, min(limit, max_cap))
+        is_capped = False
+    else:
+        if total_matching > max_cap:
+            effective_limit = max_cap
+            is_capped = True
+            logger.warning(
+                "Filter response exceeded max_filter_limit (%d > %d); truncating with has_more=True",
+                total_matching, max_cap,
+            )
+        else:
+            effective_limit = total_matching
+            is_capped = False
+
+    # Deterministic slice
+    sliced_df = filtered_df.iloc[safe_offset : safe_offset + effective_limit]
+    has_more = (safe_offset + len(sliced_df)) < total_matching
+
+    # Sanitize and serialize only the sliced records
+    records = sanitize_records_for_json(sliced_df.to_dict(orient="records"))
+
+    total_pages = (total_matching + effective_limit - 1) // effective_limit if effective_limit > 0 else 0
+    current_page = (safe_offset // effective_limit) + 1 if effective_limit > 0 else 1
+
+    resp: Dict[str, Any] = {
+        "row_count": total_matching,  # Retained for 100% backward compatibility
+        "total": total_matching,
+        "filtered_data": records,
+        "limit": effective_limit if limit is not None else (max_cap if is_capped else total_matching),
+        "offset": safe_offset,
+        "has_more": has_more,
+        "page": current_page,
+        "total_pages": total_pages,
+    }
+    if is_capped:
+        resp["is_truncated"] = True
+
+    return resp
 
 
 # ---------------------------------------------------------------------------

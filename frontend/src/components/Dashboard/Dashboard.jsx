@@ -160,8 +160,9 @@ function ColSelect({ value, options, onChange, accent = 'brand' }) {
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className={`bg-surface-elevated border border-surface-border body-xs text-content-primary
-        rounded-lg px-2.5 py-1 focus:outline-none focus:border-${accent}-500 transition-colors`}
+      aria-label="Select column"
+      className="bg-surface-elevated border border-surface-border body-xs text-content-primary
+        rounded-lg px-2.5 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus:border-brand-500 transition-colors"
     >
       {options.map(c => <option key={c} value={c}>{c}</option>)}
     </select>

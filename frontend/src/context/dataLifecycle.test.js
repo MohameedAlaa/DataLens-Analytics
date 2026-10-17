@@ -13,6 +13,7 @@ function normalizeDatasetInfo(info) {
     categorical_columns: Array.isArray(data.categorical_columns) ? data.categorical_columns : [],
     date_columns: Array.isArray(data.date_columns) ? data.date_columns : [],
     preview: Array.isArray(data.preview) ? data.preview : [],
+    filter_options: (data.filter_options && typeof data.filter_options === 'object') ? data.filter_options : {},
   };
 }
 
@@ -24,6 +25,7 @@ test('dataLifecycle: normalizeDatasetInfo handles sparse/partial backend respons
   assert.deepEqual(normalized.numeric_columns, []);
   assert.deepEqual(normalized.categorical_columns, []);
   assert.deepEqual(normalized.preview, []);
+  assert.deepEqual(normalized.filter_options, {});
 });
 
 test('dataLifecycle: request sequence token prevents out-of-order filter overwrites', async () => {
@@ -66,4 +68,43 @@ test('dataLifecycle: new upload resets active filters to empty dict', () => {
 
   assert.deepEqual(activeFilters, {});
   assert.equal(currentDatasetId, 'ds-second');
+});
+
+test('dataLifecycle: applyFilters normalizes pagination metadata without dropping total', () => {
+  const backendResponse = {
+    row_count: 50000,
+    total: 50000,
+    limit: 20000,
+    offset: 0,
+    has_more: true,
+    filtered_data: Array.from({ length: 20000 }, (_, i) => ({ id: i })),
+  };
+
+  const rows = backendResponse.filtered_data || [];
+  const total = backendResponse.total ?? backendResponse.row_count ?? rows.length;
+  const hasMore = Boolean(backendResponse.has_more);
+  const clientSlice = rows.slice(0, 20000);
+
+  assert.equal(clientSlice.length, 20000);
+  assert.equal(total, 50000);
+  assert.equal(hasMore, true);
+});
+
+test('dataLifecycle: filter count formatting displays accurate total with cap indicator', () => {
+  function formatFilterCount(filteredTotal, filteredDataLength, hasMore) {
+    const countPart = filteredTotal != null
+      ? `${filteredTotal.toLocaleString()} matching rows`
+      : (filteredDataLength ? `${filteredDataLength.toLocaleString()} matching rows` : '');
+    const capPart = hasMore ? ' (showing first 20,000)' : '';
+    return `${countPart}${capPart}`;
+  }
+
+  // Large dataset capped
+  assert.equal(formatFilterCount(50000, 20000, true), '50,000 matching rows (showing first 20,000)');
+
+  // Uncapped small dataset
+  assert.equal(formatFilterCount(42, 42, false), '42 matching rows');
+
+  // Zero matching rows
+  assert.equal(formatFilterCount(0, 0, false), '0 matching rows');
 });

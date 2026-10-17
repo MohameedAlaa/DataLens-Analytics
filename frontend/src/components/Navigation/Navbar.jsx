@@ -40,7 +40,7 @@ export default function Navbar({
       <button
         type="button"
         onClick={onToggleMobileSidebar}
-        className="md:hidden p-2 rounded-xl border border-surface-border bg-surface-card/80 text-content-secondary hover:text-content-primary hover:bg-surface-elevated transition-colors focus-visible:ring-2 focus-visible:ring-brand-400"
+        className="md:hidden p-2 rounded-xl border border-surface-border bg-surface-card/80 text-content-secondary hover:text-content-primary hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
         aria-label="Toggle navigation menu"
       >
         <Menu className="w-4 h-4" />
@@ -73,7 +73,7 @@ export default function Navbar({
                 onClick={clearDataset}
                 title="Clear current dataset"
                 aria-label="Clear current dataset"
-                className="p-1 rounded-md text-content-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                className="p-1 rounded-md text-content-muted hover:text-red-400 hover:bg-red-500/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -103,7 +103,7 @@ export default function Navbar({
             onClick={toggleCopilot}
             aria-label="Toggle AI Copilot"
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl
-                        border transition-all active:scale-95 ${
+                        border transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
                           isCopilotOpen
                             ? 'bg-brand-400 text-[#111215] border-brand-300 shadow-sm shadow-brand-400/20'
                             : 'border-surface-border bg-surface-elevated/80 text-content-primary hover:border-brand-500/40 hover:text-brand-400'

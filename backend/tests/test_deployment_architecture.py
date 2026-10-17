@@ -88,3 +88,55 @@ async def test_serverless_api_upload_statelessness():
     assert "dataset_id" in result
     assert result["shape"] == [2, 2]
     assert len(result["preview"]) == 2
+
+
+def test_canonical_backend_route_coverage():
+    """Verify that backend/app.py provides complete route coverage at both root and /api prefixes."""
+    routes = {r.path for r in app.routes}
+    required_routes = [
+        "/upload", "/api/upload",
+        "/filter", "/api/filter",
+        "/chat", "/api/chat",
+        "/stats/{dataset_id}", "/api/stats/{dataset_id}",
+        "/categories", "/api/categories",
+        "/health", "/api/health",
+    ]
+    for route in required_routes:
+        assert route in routes, f"Required canonical route '{route}' missing from backend/app.py"
+
+
+def test_production_deployment_configuration_alignment():
+    """Verify that deployment configuration files align on the decoupled architecture:
+    - frontend/vercel.json rewrites /api/* to the Render backend service.
+    - render.yaml configures the persistent backend web service on backend/app.py.
+    - root vercel.json is absent to prevent accidental serverless routing to api/.
+    """
+    import json
+    import yaml
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+
+    # 1. Root vercel.json must not exist (prevents accidental serverless deployment of api/)
+    assert not (repo_root / "vercel.json").exists(), "Root vercel.json should remain absent"
+
+    # 2. frontend/vercel.json must rewrite /api/* to the Render backend service
+    frontend_vercel = repo_root / "frontend" / "vercel.json"
+    assert frontend_vercel.exists(), "frontend/vercel.json must exist"
+    with open(frontend_vercel, "r", encoding="utf-8") as f:
+        v_data = json.load(f)
+    rewrites = v_data.get("rewrites", [])
+    api_rewrite = next((r for r in rewrites if r.get("source") == "/api/(.*)"), None)
+    assert api_rewrite is not None, "frontend/vercel.json must include /api/(.*) rewrite"
+    assert "onrender.com" in api_rewrite["destination"], "Rewrite must target Render backend"
+
+    # 3. render.yaml must target backend/app.py with single worker
+    render_yaml = repo_root / "render.yaml"
+    assert render_yaml.exists(), "render.yaml must exist"
+    with open(render_yaml, "r", encoding="utf-8") as f:
+        r_data = yaml.safe_load(f)
+    services = r_data.get("services", [])
+    assert len(services) >= 1
+    backend_service = services[0]
+    assert backend_service["rootDir"] == "backend"
+    assert "app:app" in backend_service["startCommand"]
+    assert "--workers 1" in backend_service["startCommand"]
