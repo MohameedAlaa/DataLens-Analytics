@@ -5,7 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, BackgroundTasks, Depends
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, BackgroundTasks, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -19,6 +19,7 @@ from api_helpers import (
     detect_csv_encoding,
     generate_chat_response_async,
     parse_dataset_bytes,
+    search_category_values,
 )
 from config import settings
 
@@ -352,6 +353,55 @@ async def get_stats(
             extra={"request_id": request_id, "dataset_id": dataset_id},
         )
         raise HTTPException(status_code=500, detail="Failed to compute dataset statistics.")
+
+
+# ---------------------------------------------------------------------------
+# Categories (On-demand distinct values search)
+# ---------------------------------------------------------------------------
+
+@app.get("/categories")
+@app.get("/api/categories")
+@_rate_limited(settings.rate_limit_default)
+async def get_category_values(
+    request: Request,
+    dataset_id: str = Query(..., description="Target dataset ID"),
+    column: str = Query(..., description="Target categorical column"),
+    query: str = Query("", max_length=100, description="Search substring"),
+    limit: int = Query(50, ge=1, le=100, description="Max results to return"),
+    dataset_manager: DatasetManager = Depends(get_dataset_manager),
+) -> JSONResponse:
+    """Search distinct values and counts for a dataset column."""
+    request_id = getattr(request.state, "request_id", "?")
+    lookup_key = dataset_id.strip() if dataset_id else ""
+
+    if not lookup_key:
+        raise HTTPException(status_code=400, detail="dataset_id must not be empty.")
+
+    meta = dataset_manager.get_metadata(lookup_key)
+    check_dataset_ready(meta)
+
+    df = dataset_manager.get_dataset(lookup_key)
+    if df is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset '{lookup_key}' not found. Provide a valid dataset_id from /upload.",
+        )
+
+    if column not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{column}' not found in dataset.",
+        )
+
+    try:
+        results = search_category_values(df, column=column, query=query, limit=limit)
+        return JSONResponse(content=results)
+    except Exception as exc:
+        logger.exception(
+            "Category search error",
+            extra={"request_id": request_id, "lookup_key": lookup_key, "column": column},
+        )
+        raise HTTPException(status_code=500, detail="Failed to search category values.")
 
 
 # ---------------------------------------------------------------------------

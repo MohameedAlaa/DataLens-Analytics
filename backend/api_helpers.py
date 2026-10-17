@@ -149,7 +149,10 @@ def compute_filter_options(df: pd.DataFrame, max_categories: int = 50) -> Dict[s
             filter_opts[str(col)] = {"bounds": None}
 
     for col in types["categorical_columns"]:
-        s = df[col].dropna()
+        # Count by string label so values with identical representations
+        # (e.g. numeric 1 and string "1") form a single option, matching
+        # search_category_values and the /filter label semantics.
+        s = df[col].dropna().astype(str)
         if not s.empty:
             counts = s.value_counts().head(max_categories)
             top_vals = [
@@ -170,6 +173,48 @@ def compute_filter_options(df: pd.DataFrame, max_categories: int = 50) -> Dict[s
             filter_opts[str(col)] = {"bounds": None}
 
     return filter_opts
+
+
+def search_category_values(
+    df: pd.DataFrame,
+    column: str,
+    query: str = "",
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """Search distinct values and their counts in a dataset column.
+
+    Excludes null/NaN values, handles mixed types, and performs case-insensitive
+    literal substring matching (regex=False to prevent ReDoS).
+    """
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in dataset.")
+
+    limit = max(1, min(limit, 100))
+    s = df[column].dropna().astype(str)
+
+    cleaned_query = query.strip() if query else ""
+    if cleaned_query:
+        mask = s.str.contains(cleaned_query, case=False, regex=False, na=False)
+        matched = s[mask]
+    else:
+        matched = s
+
+    val_counts = matched.value_counts()
+    total_matches = int(len(val_counts))
+    top_items = val_counts.head(limit)
+
+    values = [
+        {"value": str(k), "count": int(v)}
+        for k, v in top_items.items()
+    ]
+
+    return {
+        "column": column,
+        "query": cleaned_query,
+        "total_matches": total_matches,
+        "truncated": total_matches > limit,
+        "values": values,
+    }
 
 
 def generate_local_answer(question: str, df: pd.DataFrame) -> str:
@@ -570,6 +615,25 @@ def build_llm_service() -> RagLLMService:
 # Filter helper (unrelated to chat — kept in place)
 # ---------------------------------------------------------------------------
 
+def _categorical_label_mask(series: pd.Series, condition: List[Any]) -> pd.Series:
+    """Boolean mask selecting rows whose value is in ``condition``.
+
+    Numeric/boolean/datetime columns keep exact ``isin`` semantics. For
+    object/string/categorical columns, values are compared by string label so a
+    selected label such as "1" matches both numeric 1 and string "1" (the same
+    label grouping used by compute_filter_options and search_category_values).
+    Nulls never match. The input series is not modified.
+    """
+    if (
+        pd.api.types.is_numeric_dtype(series)
+        or pd.api.types.is_bool_dtype(series)
+        or pd.api.types.is_datetime64_any_dtype(series)
+    ):
+        return series.isin(condition)
+    labels = {str(c) for c in condition}
+    return series.notna() & series.astype(str).isin(labels)
+
+
 def filter_dataframe(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
     """Apply dictionary filtering criteria to a DataFrame and return filtered DataFrame."""
     if df.empty or not filters:
@@ -606,7 +670,7 @@ def filter_dataframe(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
                     res = res[res[col] != condition["!="]]
         else:
             if isinstance(condition, list):
-                res = res[res[col].isin(condition)]
+                res = res[_categorical_label_mask(res[col], condition)]
             else:
                 res = res[res[col] == condition]
     return res

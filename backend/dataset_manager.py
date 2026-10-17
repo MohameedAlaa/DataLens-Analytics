@@ -1,12 +1,14 @@
 import abc
 import json
 import logging
+import os
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+import pyarrow as pa
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +120,135 @@ class DiskStorageEngine(BaseStorageEngine):
 
     def store(self, dataset_id: str, df: pd.DataFrame, metadata: Dict[str, Any]) -> None:
         with self._lock:
-            df.to_parquet(self._df_path(dataset_id), index=False)
-            with open(self._meta_path(dataset_id), "w", encoding="utf-8") as f:
-                json.dump(metadata, f, indent=2)
+            df_path = self._df_path(dataset_id)
+            meta_path = self._meta_path(dataset_id)
+
+            # Write to temporary files with non-.parquet extensions to prevent glob collisions
+            tmp_suffix = f".tmp_{uuid.uuid4().hex}"
+            tmp_df_path = self.storage_dir / f"{dataset_id}.parquet{tmp_suffix}"
+            tmp_meta_path = self.storage_dir / f"{dataset_id}.meta.json{tmp_suffix}"
+
+            bak_suffix = f".bak_{uuid.uuid4().hex}"
+            bak_df_path = self.storage_dir / f"{dataset_id}.parquet{bak_suffix}"
+            bak_meta_path = self.storage_dir / f"{dataset_id}.meta.json{bak_suffix}"
+
+            df_backed_up = False
+            meta_backed_up = False
+            df_committed = False
+            meta_committed = False
+
+            try:
+                # 1. Write payload to temporary files
+                try:
+                    df.to_parquet(tmp_df_path, index=False)
+                except (pa.ArrowInvalid, getattr(pa, "ArrowTypeError", TypeError)) as e:
+                    # Fallback for mixed-type object columns (e.g. numeric and string in Excel uploads)
+                    # where PyArrow cannot infer a homogeneous physical type for an 'object' column.
+                    logger.warning(
+                        "Standard to_parquet failed for dataset '%s' (%s). Normalizing object columns to strings.",
+                        dataset_id,
+                        e,
+                    )
+                    if tmp_df_path.is_file():
+                        tmp_df_path.unlink()
+                    clean_df = df.copy()
+                    for col in clean_df.select_dtypes(include=["object"]).columns:
+                        clean_df[col] = clean_df[col].map(lambda x: str(x) if pd.notna(x) else None)
+                    clean_df.to_parquet(tmp_df_path, index=False)
+
+                with open(tmp_meta_path, "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, indent=2)
+
+                # 2. Back up existing dataset files if present before modifying destinations
+                if df_path.is_file():
+                    os.replace(df_path, bak_df_path)
+                    df_backed_up = True
+                if meta_path.is_file():
+                    os.replace(meta_path, bak_meta_path)
+                    meta_backed_up = True
+
+                # 3. Two-phase replacement with full rollback protection
+                os.replace(tmp_df_path, df_path)
+                df_committed = True
+
+                os.replace(tmp_meta_path, meta_path)
+                meta_committed = True
+
+                # 4. Clean up backups on complete commit success
+                if df_backed_up and bak_df_path.is_file():
+                    bak_df_path.unlink()
+                if meta_backed_up and bak_meta_path.is_file():
+                    bak_meta_path.unlink()
+
+            except Exception:
+                # Rollback destination files to previous valid state if any replacement occurred.
+                # Execute metadata and Parquet recovery independently so failure in one does not abort the other.
+                if meta_committed:
+                    if meta_backed_up:
+                        try:
+                            os.replace(bak_meta_path, meta_path)
+                        except Exception as e:
+                            logger.critical(
+                                "CRITICAL RECOVERY FAILURE: Failed to restore metadata backup '%s' -> '%s': %s. "
+                                "Surviving backup preserved on disk.",
+                                bak_meta_path,
+                                meta_path,
+                                e,
+                            )
+                    elif meta_path.is_file():
+                        try:
+                            meta_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                elif meta_backed_up:
+                    try:
+                        os.replace(bak_meta_path, meta_path)
+                    except Exception as e:
+                        logger.critical(
+                            "CRITICAL RECOVERY FAILURE: Failed to restore metadata backup '%s' -> '%s': %s. "
+                            "Surviving backup preserved on disk.",
+                            bak_meta_path,
+                            meta_path,
+                            e,
+                        )
+
+                if df_committed:
+                    if df_backed_up:
+                        try:
+                            os.replace(bak_df_path, df_path)
+                        except Exception as e:
+                            logger.critical(
+                                "CRITICAL RECOVERY FAILURE: Failed to restore Parquet backup '%s' -> '%s': %s. "
+                                "Surviving backup preserved on disk.",
+                                bak_df_path,
+                                df_path,
+                                e,
+                            )
+                    elif df_path.is_file():
+                        try:
+                            df_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                elif df_backed_up:
+                    try:
+                        os.replace(bak_df_path, df_path)
+                    except Exception as e:
+                        logger.critical(
+                            "CRITICAL RECOVERY FAILURE: Failed to restore Parquet backup '%s' -> '%s': %s. "
+                            "Surviving backup preserved on disk.",
+                            bak_df_path,
+                            df_path,
+                            e,
+                        )
+
+                # Clean up ONLY temporary staging files; NEVER delete unrestored backups on failure
+                for p in (tmp_df_path, tmp_meta_path):
+                    if p.is_file():
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                raise
 
     def get(self, dataset_id: str) -> Optional[pd.DataFrame]:
         with self._lock:
@@ -164,7 +292,14 @@ class DiskStorageEngine(BaseStorageEngine):
 
     def list_ids(self) -> List[str]:
         with self._lock:
-            return [p.stem for p in self.storage_dir.glob("*.parquet")]
+            active_ids = []
+            for p in self.storage_dir.glob("*.parquet"):
+                if p.name.startswith(".") or ".tmp_" in p.name or ".bak_" in p.name:
+                    continue
+                dataset_id = p.stem
+                if (self.storage_dir / f"{dataset_id}.meta.json").is_file():
+                    active_ids.append(dataset_id)
+            return active_ids
 
 
 class DatasetManager:

@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import axios from 'axios';
 import { useData } from '../../context/DataContext';
 import { useFilters } from '../../hooks/useFilters';
+import { apiClient, extractErrorMessage } from '../../utils/apiClient';
 import {
   RefreshCw,
   ChevronDown,
@@ -35,6 +37,16 @@ export default function Filters() {
   const [columnSearch, setColumnSearch] = useState('');
   const debounceRef = useRef(null);
   const initialised = useRef(false);
+
+  // ── Category Value Search State per Column ────────────────────────────────
+  const [categorySearch, setCategorySearch] = useState({});
+  const [categoryResults, setCategoryResults] = useState({});
+  const [categoryLoading, setCategoryLoading] = useState({});
+  const [categoryError, setCategoryError] = useState({});
+
+  const categoryAbortControllers = useRef({});
+  const categoryDebounceTimers = useRef({});
+  const categoryRequestSeqs = useRef({});
 
   // ── Numeric Bounds Helper ─────────────────────────────────────────────────
   const getNumericBounds = useCallback((col) => {
@@ -97,6 +109,102 @@ export default function Filters() {
     return init;
   }, [datasetInfo, getNumericBounds]);
 
+  // ── Category Search Handlers & Cleanup ────────────────────────────────────
+  const cleanupCategorySearches = useCallback(() => {
+    Object.values(categoryDebounceTimers.current).forEach((timer) => {
+      if (timer) clearTimeout(timer);
+    });
+    categoryDebounceTimers.current = {};
+    Object.values(categoryAbortControllers.current).forEach((controller) => {
+      if (controller) controller.abort();
+    });
+    categoryAbortControllers.current = {};
+  }, []);
+
+  const resetCategorySearches = useCallback(() => {
+    cleanupCategorySearches();
+    setCategorySearch({});
+    setCategoryResults({});
+    setCategoryLoading({});
+    setCategoryError({});
+    categoryRequestSeqs.current = {};
+  }, [cleanupCategorySearches]);
+
+  useEffect(() => {
+    return () => {
+      cleanupCategorySearches();
+    };
+  }, [cleanupCategorySearches]);
+
+  const handleCategorySearchChange = useCallback((col, text) => {
+    setCategorySearch((prev) => ({ ...prev, [col]: text }));
+
+    if (categoryDebounceTimers.current[col]) {
+      clearTimeout(categoryDebounceTimers.current[col]);
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      if (categoryAbortControllers.current[col]) {
+        categoryAbortControllers.current[col].abort();
+      }
+      setCategoryResults((prev) => {
+        const next = { ...prev };
+        delete next[col];
+        return next;
+      });
+      setCategoryError((prev) => ({ ...prev, [col]: null }));
+      setCategoryLoading((prev) => ({ ...prev, [col]: false }));
+      return;
+    }
+
+    setCategoryLoading((prev) => ({ ...prev, [col]: true }));
+    setCategoryError((prev) => ({ ...prev, [col]: null }));
+
+    categoryDebounceTimers.current[col] = setTimeout(async () => {
+      if (!datasetInfo?.dataset_id) return;
+
+      if (categoryAbortControllers.current[col]) {
+        categoryAbortControllers.current[col].abort();
+      }
+      const abortController = new AbortController();
+      categoryAbortControllers.current[col] = abortController;
+      const seq = (categoryRequestSeqs.current[col] || 0) + 1;
+      categoryRequestSeqs.current[col] = seq;
+
+      try {
+        const resp = await apiClient.get('/categories', {
+          params: {
+            dataset_id: datasetInfo.dataset_id,
+            column: col,
+            query: trimmed,
+            limit: 50,
+          },
+          signal: abortController.signal,
+        });
+
+        if (seq === categoryRequestSeqs.current[col]) {
+          setCategoryResults((prev) => ({ ...prev, [col]: resp.data }));
+          setCategoryError((prev) => ({ ...prev, [col]: null }));
+        }
+      } catch (err) {
+        if (axios.isCancel(err) || err.name === 'CanceledError' || err.name === 'AbortError') {
+          return;
+        }
+        if (seq === categoryRequestSeqs.current[col]) {
+          setCategoryError((prev) => ({
+            ...prev,
+            [col]: extractErrorMessage(err, 'Failed to search categories'),
+          }));
+        }
+      } finally {
+        if (seq === categoryRequestSeqs.current[col]) {
+          setCategoryLoading((prev) => ({ ...prev, [col]: false }));
+        }
+      }
+    }, 300);
+  }, [datasetInfo?.dataset_id]);
+
   // ── Initialise when dataset changes ───────────────────────────────────────
   useEffect(() => {
     if (!datasetInfo) return;
@@ -107,25 +215,28 @@ export default function Filters() {
     });
     setLocalFilters(init);
     setOpenSections(open);
+    resetCategorySearches();
     initialised.current = false;
-  }, [datasetInfo?.dataset_id]);
+  }, [datasetInfo?.dataset_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle explicit reset of filters
   const handleResetFilters = useCallback(async () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     initialised.current = false;
+    resetCategorySearches();
     setLocalFilters(getInitialFilters());
     await resetFilters();
-  }, [getInitialFilters, resetFilters]);
+  }, [getInitialFilters, resetFilters, resetCategorySearches]);
 
   // Sync if external filters transitioned from non-empty to empty
   const prevFiltersRef = useRef(filters);
   useEffect(() => {
     if (datasetInfo && Object.keys(prevFiltersRef.current || {}).length > 0 && Object.keys(filters || {}).length === 0) {
+      resetCategorySearches();
       setLocalFilters(getInitialFilters());
     }
     prevFiltersRef.current = filters;
-  }, [filters, datasetInfo, getInitialFilters]);
+  }, [filters, datasetInfo, getInitialFilters, resetCategorySearches]);
 
   // ── Build backend payload ─────────────────────────────────────────────────
   const buildPayload = useCallback(() => {
@@ -476,13 +587,54 @@ export default function Filters() {
                         <div className="px-2.5 pb-2.5 pt-1.5 border-t border-surface-border/60 bg-surface-bg/40">
                         {/* Categorical Filter Control */}
                         {type === 'cat' && (() => {
-                          const items = topValues(col);
+                          const queryText = categorySearch[col] || '';
+                          const isSearching = Boolean(queryText.trim());
+                          const searchLoading = Boolean(categoryLoading[col]);
+                          const searchErr = categoryError[col];
+                          const searchRes = categoryResults[col];
+
+                          const baseItems = isSearching
+                            ? (searchRes ? searchRes.values : [])
+                            : topValues(col);
+
                           const selected = localFilters[col] || [];
-                          const allVals = items.map((it) => it.value);
+
+                          const baseValuesSet = new Set(baseItems.map((item) => item.value));
+                          const pinnedItems = selected
+                            .filter((val) => !baseValuesSet.has(val))
+                            .map((val) => ({ value: val, count: null, isPinned: true }));
+
+                          const displayItems = [...pinnedItems, ...baseItems];
+                          const allVals = displayItems.map((it) => it.value);
                           const allSelected = allVals.length > 0 && allVals.every((v) => selected.includes(v));
 
                           return (
-                            <div className="space-y-1">
+                            <div className="space-y-1.5">
+                              {/* Category Substring Search Input */}
+                              <div className="relative">
+                                <Search className="w-2.5 h-2.5 text-content-muted absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                  type="text"
+                                  placeholder={`Search in ${col}...`}
+                                  value={queryText}
+                                  onChange={(e) => handleCategorySearchChange(col, e.target.value)}
+                                  aria-label={`Search values in ${col}`}
+                                  className="w-full pl-6 pr-6 py-0.5 text-[11px] rounded-md bg-surface-bg border border-surface-border/70
+                                             text-content-primary placeholder:text-content-muted/70
+                                             focus:border-brand-500/60 focus:bg-surface-bg focus:outline-none transition-colors"
+                                />
+                                {queryText && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCategorySearchChange(col, '')}
+                                    aria-label={`Clear search in ${col}`}
+                                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-content-muted hover:text-content-primary rounded"
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                )}
+                              </div>
+
                               {/* Quick Actions (Select all / Deselect) */}
                               <div className="flex items-center justify-between pb-1 border-b border-surface-border/50 text-[10px]">
                                 <button
@@ -493,61 +645,99 @@ export default function Filters() {
                                       const isAll = allVals.length > 0 && allVals.every((x) => cur.includes(x));
                                       return {
                                         ...prev,
-                                        [col]: isAll ? [] : allVals
+                                        [col]: isAll ? [] : Array.from(new Set([...cur, ...allVals]))
                                       };
                                     });
                                   }}
                                   className="text-brand-400 hover:text-brand-300 font-medium transition-colors"
                                 >
-                                  {allSelected ? 'Deselect all' : 'Select all'}
+                                  {allSelected ? 'Deselect visible' : 'Select visible'}
                                 </button>
                                 {selected.length > 0 && (
                                   <span className="text-content-muted font-mono">
-                                    {selected.length} of {allVals.length}
+                                    {selected.length} selected
                                   </span>
                                 )}
                               </div>
 
+                              {/* Truncation / Matches Notice */}
+                              {isSearching && searchRes && searchRes.truncated && (
+                                <p className="text-[10px] text-brand-300/90 bg-brand-500/10 px-1.5 py-0.5 rounded border border-brand-500/20">
+                                  Showing top 50 of {searchRes.total_matches} matches. Refine search for more.
+                                </p>
+                              )}
+
+                              {/* Error Notice */}
+                              {searchErr && (
+                                <p className="text-[10px] text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
+                                  {searchErr}
+                                </p>
+                              )}
+
+                              {/* Loading State */}
+                              {searchLoading && (
+                                <div className="flex items-center gap-1.5 py-2 text-[11px] text-content-muted justify-center">
+                                  <RefreshCw className="w-3 h-3 text-brand-400 animate-spin" />
+                                  <span>Searching categories…</span>
+                                </div>
+                              )}
+
+                              {/* Empty Results State */}
+                              {!searchLoading && isSearching && displayItems.length === 0 && (
+                                <p className="text-[11px] text-content-muted py-2 text-center">
+                                  No categories match &quot;{queryText}&quot;
+                                </p>
+                              )}
+
                               {/* Options List */}
-                              <div className="space-y-0.5 max-h-36 overflow-y-auto custom-scrollbar pt-1 pr-0.5">
-                                {items.map(({ value: v, count: cnt }) => {
-                                  const isChecked = selected.includes(v);
-                                  return (
-                                    <label
-                                      key={v}
-                                      className={`flex items-center justify-between gap-2 px-1.5 py-1 rounded cursor-pointer transition-colors ${
-                                        isChecked
-                                          ? 'bg-brand-500/10 text-white font-medium'
-                                          : 'text-content-secondary hover:bg-surface-elevated hover:text-content-primary'
-                                      }`}
-                                    >
-                                      <span className="flex items-center gap-2 min-w-0">
-                                        <input
-                                          type="checkbox"
-                                          checked={isChecked}
-                                          onChange={(e) => {
-                                            const isCheckedNow = e.target.checked;
-                                            setLocalFilters((prev) => {
-                                              const cur = prev[col] || [];
-                                              return {
-                                                ...prev,
-                                                [col]: isCheckedNow
-                                                  ? [...cur, v]
-                                                  : cur.filter((x) => x !== v)
-                                              };
-                                            });
-                                          }}
-                                          className="w-3.5 h-3.5 rounded border-surface-border text-brand-400 accent-brand-400 focus:ring-brand-400 bg-surface-card"
-                                        />
-                                        <span className="text-xs truncate" title={v}>{v}</span>
-                                      </span>
-                                      <span className="text-[10px] font-mono text-content-muted shrink-0">
-                                        {cnt.toLocaleString()}
-                                      </span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
+                              {displayItems.length > 0 && (
+                                <div className="space-y-0.5 max-h-36 overflow-y-auto custom-scrollbar pt-0.5 pr-0.5">
+                                  {displayItems.map(({ value: v, count: cnt, isPinned }) => {
+                                    const isChecked = selected.includes(v);
+                                    return (
+                                      <label
+                                        key={v}
+                                        className={`flex items-center justify-between gap-2 px-1.5 py-1 rounded cursor-pointer transition-colors ${
+                                          isChecked
+                                            ? 'bg-brand-500/10 text-white font-medium'
+                                            : 'text-content-secondary hover:bg-surface-elevated hover:text-content-primary'
+                                        }`}
+                                      >
+                                        <span className="flex items-center gap-2 min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              const isCheckedNow = e.target.checked;
+                                              setLocalFilters((prev) => {
+                                                const cur = prev[col] || [];
+                                                return {
+                                                  ...prev,
+                                                  [col]: isCheckedNow
+                                                    ? [...cur, v]
+                                                    : cur.filter((x) => x !== v)
+                                                };
+                                              });
+                                            }}
+                                            className="w-3.5 h-3.5 rounded border-surface-border text-brand-400 accent-brand-400 focus:ring-brand-400 bg-surface-card"
+                                          />
+                                          <span className="text-xs truncate" title={v}>
+                                            {v}
+                                            {isPinned && !isSearching && (
+                                              <span className="ml-1 text-[9px] text-brand-400/80 font-mono">(active)</span>
+                                            )}
+                                          </span>
+                                        </span>
+                                        {cnt != null && (
+                                          <span className="text-[10px] font-mono text-content-muted shrink-0">
+                                            {cnt.toLocaleString()}
+                                          </span>
+                                        )}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           );
                         })()}
