@@ -56,6 +56,13 @@ export default defineConfig({
   },
   preview: {
     port: 4173,
+    headers: {
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://datalens-backend-jt3p.onrender.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';",
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    },
     proxy: {
       '/api': {
         target: process.env.VITE_BACKEND_TARGET || 'https://datalens-backend-jt3p.onrender.com',
