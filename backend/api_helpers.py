@@ -156,15 +156,32 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     }
 
 
+def _numeric_frame_for_stats(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
+    """Return a copy of the numeric columns suitable for describe()/corr().
+
+    pandas reports bool columns as numeric dtype, but DataFrame.describe()
+    silently omits them when other numeric columns are present. Boolean columns
+    are therefore represented as 0/1 floats (missing -> NaN) for statistics only;
+    the source DataFrame is never modified.
+    """
+    frame = df[numeric_cols].copy()
+    for col in numeric_cols:
+        if pd.api.types.is_bool_dtype(frame[col]):
+            frame[col] = frame[col].astype("Float64").astype("float64")
+    return frame
+
+
 def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
     """Calculate numerical statistics, categorical summaries, and correlation matrix."""
     types = classify_columns(df)
     numeric_cols = types["numeric_columns"]
     categorical_cols = types["categorical_columns"]
 
+    numeric_frame = _numeric_frame_for_stats(df, numeric_cols) if numeric_cols else None
+
     numeric_summary = {}
     if numeric_cols:
-        desc = df[numeric_cols].describe().to_dict()
+        desc = numeric_frame.describe().to_dict()
         for col in numeric_cols:
             raw_count = desc[col].get("count", 0)
             numeric_summary[str(col)] = {
@@ -180,7 +197,7 @@ def calculate_dataset_stats(df: pd.DataFrame) -> Dict[str, Any]:
 
     corr_matrix = {}
     if len(numeric_cols) > 1:
-        corr_df = df[numeric_cols].corr().replace([np.inf, -np.inf], 0).fillna(0)
+        corr_df = numeric_frame.corr().replace([np.inf, -np.inf], 0).fillna(0)
         corr_matrix = {
             str(c): {str(k): sanitize_json_value(v) for k, v in corr_df[c].to_dict().items()}
             for c in corr_df.columns
@@ -428,7 +445,9 @@ def parse_dataset_bytes(
 
     preview_df = df.head(preview_limit).copy()
     for col in preview_df.select_dtypes(include=["datetime", "datetime64"]).columns:
-        preview_df[col] = preview_df[col].astype(str)
+        preview_df[col] = preview_df[col].apply(
+            lambda x: None if pd.isna(x) else str(x)
+        )
 
     preview = sanitize_records_for_json(preview_df.to_dict(orient="records"))
     types = classify_columns(df)

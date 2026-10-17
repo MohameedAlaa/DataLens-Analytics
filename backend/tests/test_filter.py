@@ -175,7 +175,11 @@ def test_filter_inline_data_with_non_finite_values(client):
         "data": inline_data,
         "filters": {"qty": {"min": -20}},
     }
-    response = client.post("/filter", json=filter_req)
+    response = client.post(
+        "/filter",
+        content=json.dumps(filter_req),
+        headers={"Content-Type": "application/json"},
+    )
     assert response.status_code == 200
 
     # Ensure response strictly conforms to RFC 8259 without raw NaN / Infinity tokens
@@ -219,6 +223,7 @@ def test_upload_excel_with_nat_and_non_finite_preview(client):
         "id": [1, 2],
         "created_at": [pd.Timestamp("2026-05-16 10:30:00"), pd.NaT],
         "balance": [0.0, float("nan")],
+        "tag": ["NaT", "valid"],
     })
     excel_buffer = io.BytesIO()
     df.to_excel(excel_buffer, index=False)
@@ -238,12 +243,70 @@ def test_upload_excel_with_nat_and_non_finite_preview(client):
     preview = parsed["preview"]
     assert len(preview) == 2
 
-    # Row 0: valid timestamp and 0.0 float preserved
+    # Row 0: valid timestamp and 0.0 float preserved, literal string 'NaT' preserved
     assert "2026-05-16" in preview[0]["created_at"]
     assert preview[0]["balance"] == 0.0
     assert type(preview[0]["balance"]) is float
+    assert preview[0]["tag"] == "NaT"
 
-    # Row 1: NaT and NaN converted to null
+    # Row 1: NaT and NaN converted to null, literal string preserved
     assert preview[1]["created_at"] is None
     assert preview[1]["balance"] is None
+    assert preview[1]["tag"] == "valid"
+
+
+def test_literal_strings_preserved_vs_missing_values(client):
+    """Verify that actual pandas missing values (pd.NaT, pd.NA, NaN) serialize as JSON null,
+    while literal user strings 'NaT' and '<NA>' remain intact without corruption.
+    """
+    import numpy as np
+    import pandas as pd
+    from api_helpers import sanitize_json_value, sanitize_records_for_json
+
+    # 1. Unit-level validation of sanitize_json_value
+    assert sanitize_json_value(pd.NaT) is None
+    assert sanitize_json_value(pd.NA) is None
+    assert sanitize_json_value(np.nan) is None
+    assert sanitize_json_value(float("nan")) is None
+    assert sanitize_json_value(float("inf")) is None
+    assert sanitize_json_value(float("-inf")) is None
+    assert sanitize_json_value("NaT") == "NaT"
+    assert sanitize_json_value("<NA>") == "<NA>"
+    assert sanitize_json_value("normal text") == "normal text"
+
+    # 2. Record-level sanitization preserving literal strings and mapping sentinels to null
+    records = [
+        {
+            "id": 1,
+            "user_label": "NaT",
+            "user_code": "<NA>",
+            "actual_nat": pd.NaT,
+            "actual_na": pd.NA,
+            "actual_nan": np.nan,
+        }
+    ]
+    sanitized = sanitize_records_for_json(records)
+    assert sanitized[0]["user_label"] == "NaT"
+    assert sanitized[0]["user_code"] == "<NA>"
+    assert sanitized[0]["actual_nat"] is None
+    assert sanitized[0]["actual_na"] is None
+    assert sanitized[0]["actual_nan"] is None
+
+    # 3. Endpoint-level validation via /filter
+    filter_req = {
+        "data": [
+            {"item": "X", "tag": "NaT", "code": "<NA>", "missing_field": None, "val": 100},
+            {"item": "Y", "tag": "Regular", "code": "OK", "missing_field": None, "val": 200},
+        ],
+        "filters": {"val": {"min": 50}},
+    }
+    res = client.post("/filter", json=filter_req)
+    assert res.status_code == 200
+    rows = res.json()["filtered_data"]
+    assert len(rows) == 2
+    assert rows[0]["tag"] == "NaT"
+    assert rows[0]["code"] == "<NA>"
+    assert rows[0]["missing_field"] is None
+    assert rows[1]["tag"] == "Regular"
+    assert rows[1]["code"] == "OK"
 
